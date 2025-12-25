@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Online 3D Hands</title>
+  <style>
+    html, body { margin:0; height:100%; background:#0b0f14; color:#e6e6e6; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #wrap { display:grid; grid-template-columns: 360px 1fr; height:100%; }
+    #left { padding:16px; border-right:1px solid rgba(255,255,255,0.08); overflow:auto; }
+    #right { position:relative; overflow:hidden; }
+    canvas { display:block; }
+    .card { background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:12px; margin-bottom:12px; }
+    .row { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    label { display:flex; align-items:center; gap:10px; }
+    input[type="range"]{ width:180px; }
+    #video { width:100%; border-radius:14px; transform: scaleX(-1); background:#000; }
+    #status { font-size: 13px; opacity:0.9; }
+    .hint { font-size: 12px; opacity:0.75; line-height:1.4; }
+    button { cursor:pointer; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:#fff; }
+    button:hover { background:rgba(255,255,255,0.10); }
+    input, select { background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.14); border-radius:10px; padding:6px 8px; }
+    code { background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:8px; }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <div id="left">
+    <h2 style="margin:0 0 10px;">Online 3D Hands</h2>
+
+    <div class="card">
+      <video id="video" autoplay playsinline></video>
+      <div id="status" style="margin-top:10px;">Status: idle</div>
+      <div class="hint" style="margin-top:8px;">
+        Drag the 3D view to rotate. Scroll to zoom.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <label><input id="mirror" type="checkbox" checked> Mirror video</label>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <label>Room
+          <input id="room" style="width:160px;" />
+        </label>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <label>Max hands
+          <select id="maxHands">
+            <option value="1">1</option>
+            <option value="2" selected>2</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <label>Confidence
+          <input id="conf" type="range" min="0.1" max="0.9" step="0.05" value="0.5">
+          <span id="confVal">0.50</span>
+        </label>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <button id="startBtn">Start Camera</button>
+        <button id="stopBtn" disabled>Stop</button>
+      </div>
+
+      <div class="hint" style="margin-top:10px;">
+        Share this link with a friend:<br/>
+        <code id="shareLink"></code>
+      </div>
+    </div>
+
+    <div class="hint">
+      Works best if both people open the same room link.
+      The first person in the room becomes host and auto-connects when the second joins.
+    </div>
+  </div>
+
+  <div id="right"></div>
+</div>
+
+<script type="module">
+  import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+  import { OrbitControls } from "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+  import { Hands } from "https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js";
+  import { Camera } from "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js";
+
+  // ===== UI =====
+  const video = document.getElementById("video");
+  const statusEl = document.getElementById("status");
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn = document.getElementById("stopBtn");
+  const mirrorChk = document.getElementById("mirror");
+  const maxHandsSel = document.getElementById("maxHands");
+  const confRange = document.getElementById("conf");
+  const confVal = document.getElementById("confVal");
+  const roomInput = document.getElementById("room");
+  const shareLinkEl = document.getElementById("shareLink");
+
+  confRange.addEventListener("input", () => confVal.textContent = Number(confRange.value).toFixed(2));
+  mirrorChk.addEventListener("change", () => video.style.transform = mirrorChk.checked ? "scaleX(-1)" : "none");
+
+  // Room in URL
+  const urlRoom = new URLSearchParams(location.search).get("room") || "room1";
+  roomInput.value = urlRoom;
+
+  function updateShareLink() {
+    const room = roomInput.value.trim() || "room1";
+    const u = new URL(location.href);
+    u.searchParams.set("room", room);
+    shareLinkEl.textContent = u.toString();
+  }
+  roomInput.addEventListener("input", updateShareLink);
+  updateShareLink();
+
+  // ===== Three.js scene =====
+  const container = document.getElementById("right");
+  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setPixelRatio(devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0f14);
+
+  const camera3D = new THREE.PerspectiveCamera(60, 1, 0.01, 100);
+  camera3D.position.set(0, 0.2, 1.2);
+
+  const controls = new OrbitControls(camera3D, renderer.domElement);
+  controls.enableDamping = true;
+  controls.target.set(0, 0.15, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(2, 3, 2);
+  scene.add(dir);
+
+  const grid = new THREE.GridHelper(2, 20, 0xffffff, 0xffffff);
+  grid.material.opacity = 0.12;
+  grid.material.transparent = true;
+  scene.add(grid);
+
+  function resize() {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    renderer.setSize(w, h);
+    camera3D.aspect = w / h;
+    camera3D.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // MediaPipe Hands landmark connections
+  const CONNECTIONS = [
+    [0,1],[1,2],[2,3],[3,4],
+    [0,5],[5,6],[6,7],[7,8],
+    [0,9],[9,10],[10,11],[11,12],
+    [0,13],[13,14],[14,15],[15,16],
+    [0,17],[17,18],[18,19],[19,20],
+    [5,9],[9,13],[13,17]
+  ];
+
+  function makeHandGroup(hexColor) {
+    const group = new THREE.Group();
+
+    const jointGeo = new THREE.SphereGeometry(0.01, 16, 16);
+    const jointMat = new THREE.MeshStandardMaterial({ color: hexColor });
+
+    const joints = Array.from({ length: 21 }, () => {
+      const m = new THREE.Mesh(jointGeo, jointMat);
+      group.add(m);
+      return m;
+    });
+
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent:true, opacity:0.85 });
+    const lines = CONNECTIONS.map(() => {
+      const geom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+      const line = new THREE.Line(geom, lineMat);
+      group.add(line);
+      return line;
+    });
+
+    group.visible = false;
+    scene.add(group);
+    return { group, joints, lines };
+  }
+
+  // Local hands (blue)
+  const localHand1 = makeHandGroup(0x4aa3ff);
+  const localHand2 = makeHandGroup(0x4aa3ff);
+
+  // Remote hands (pink)
+  const remoteHand1 = makeHandGroup(0xff4aa3);
+  const remoteHand2 = makeHandGroup(0xff4aa3);
+
+  function mpToWorld(lm) {
+    const x = (lm.x - 0.5) * 0.9;
+    const y = (0.5 - lm.y) * 0.9;
+    const z = (lm.z) * 0.9;
+    return new THREE.Vector3(x, y, z);
+  }
+
+  function updateHand(handObj, landmarks) {
+    if (!landmarks) {
+      handObj.group.visible = false;
+      return;
+    }
+    handObj.group.visible = true;
+
+    for (let i = 0; i < 21; i++) {
+      const p = mpToWorld(landmarks[i]);
+      handObj.joints[i].position.copy(p);
+    }
+
+    for (let i = 0; i < CONNECTIONS.length; i++) {
+      const [a, b] = CONNECTIONS[i];
+      const pa = handObj.joints[a].position;
+      const pb = handObj.joints[b].position;
+      const arr = new Float32Array([pa.x, pa.y, pa.z, pb.x, pb.y, pb.z]);
+      handObj.lines[i].geometry.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+      handObj.lines[i].geometry.computeBoundingSphere();
+    }
+  }
+
+  function setStatus(s) { statusEl.textContent = "Status: " + s; }
+
+  // ===== WebSocket signaling =====
+  let ws = null;
+  let clientId = null;
+  let isHost = false;
+  let peerCount = 0;
+
+  function wsUrl() {
+    // On the internet, use wss:// (secure). :contentReference[oaicite:2]{index=2}
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${location.host}`;
+  }
+
+  // ===== WebRTC =====
+  let pc = null;
+  let dc = null;
+  let rtcStarted = false;
+
+  function resetRTC() {
+    rtcStarted = false;
+    if (dc) { try { dc.close(); } catch {} }
+    if (pc) { try { pc.close(); } catch {} }
+    dc = null;
+    pc = null;
+  }
+
+  function makePC() {
+    const peer = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+
+    peer.onicecandidate = (e) => {
+      if (e.candidate && ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "ice", candidate: e.candidate }));
+      }
+    };
+
+    peer.ondatachannel = (ev) => {
+      dc = ev.channel;
+      wireDC();
+    };
+
+    return peer;
+  }
+
+  function wireDC() {
+    if (!dc) return;
+    dc.binaryType = "arraybuffer";
+
+    dc.onopen = () => setStatus(`connected (DataChannel open, peers=${peerCount})`);
+    dc.onclose = () => setStatus("disconnected (DataChannel closed)");
+    dc.onerror = () => setStatus("DataChannel error");
+
+    dc.onmessage = (ev) => {
+      const buf = new Float32Array(ev.data);
+      // buf contains 2 hands packed:
+      // first 63 floats = hand1, next 63 floats = hand2
+      const h1 = buf.subarray(0, 63);
+      const h2 = buf.subarray(63, 126);
+      applyRemotePose(h1, remoteHand1);
+      applyRemotePose(h2, remoteHand2);
+    };
+  }
+
+  async function hostStartRTC() {
+    if (!isHost || rtcStarted) return;
+    if (peerCount < 2) return;
+
+    rtcStarted = true;
+    resetRTC();
+    pc = makePC();
+
+    dc = pc.createDataChannel("hands");
+    wireDC();
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    ws.send(JSON.stringify({ type: "offer", offer }));
+  }
+
+  async function handleOffer(offer) {
+    resetRTC();
+    pc = makePC();
+    await pc.setRemoteDescription(offer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    ws.send(JSON.stringify({ type: "answer", answer }));
+  }
+
+  async function handleAnswer(answer) {
+    if (!pc) return;
+    await pc.setRemoteDescription(answer);
+  }
+
+  async function handleICE(candidate) {
+    if (!pc) return;
+    try { await pc.addIceCandidate(candidate); } catch {}
+  }
+
+  function applyRemotePose(pose63, handObj) {
+    // If no data, hide
+    if (!pose63 || pose63.length !== 63) {
+      handObj.group.visible = false;
+      return;
+    }
+
+    // Detect "empty" hand (all zeros)
+    let sumAbs = 0;
+    for (let i = 0; i < 63; i++) sumAbs += Math.abs(pose63[i]);
+    if (sumAbs < 0.00001) {
+      handObj.group.visible = false;
+      return;
+    }
+
+    handObj.group.visible = true;
+
+    for (let i = 0; i < 21; i++) {
+      const x = pose63[i*3+0];
+      const y = pose63[i*3+1];
+      const z = pose63[i*3+2];
+      const p = mpToWorld({ x, y, z });
+      handObj.joints[i].position.copy(p);
+    }
+
+    for (let i = 0; i < CONNECTIONS.length; i++) {
+      const [a, b] = CONNECTIONS[i];
+      const pa = handObj.joints[a].position;
+      const pb = handObj.joints[b].position;
+      const arr = new Float32Array([pa.x, pa.y, pa.z, pb.x, pb.y, pb.z]);
+      handObj.lines[i].geometry.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+      handObj.lines[i].geometry.computeBoundingSphere();
+    }
+  }
+
+  function connectSignaling() {
+    const room = roomInput.value.trim() || "room1";
+    resetRTC();
+
+    ws = new WebSocket(wsUrl());
+    ws.onopen = () => {
+      clientId = (crypto?.randomUUID?.() || Math.random().toString(16).slice(2));
+      ws.send(JSON.stringify({ type: "join", roomId: room, clientId }));
+      setStatus("signaling connected");
+    };
+
+    ws.onmessage = async (ev) => {
+      const msg = JSON.parse(ev.data);
+
+      if (msg.type === "joined") {
+        isHost = !!msg.isHost;
+        peerCount = msg.peerCount || 1;
+        setStatus(`joined room "${msg.roomId}" (${isHost ? "host" : "guest"}, peers=${peerCount})`);
+        // Host waits for 2 peers, then starts RTC
+        if (isHost) hostStartRTC();
+        return;
+      }
+
+      if (msg.type === "room") {
+        peerCount = msg.peerCount || peerCount;
+        const hostId = msg.hostId || null;
+        isHost = hostId === clientId;
+        setStatus(`room update (peers=${peerCount})`);
+        if (isHost) hostStartRTC();
+        return;
+      }
+
+      if (msg.type === "offer") await handleOffer(msg.offer);
+      if (msg.type === "answer") await handleAnswer(msg.answer);
+      if (msg.type === "ice") await handleICE(msg.candidate);
+    };
+
+    ws.onerror = () => setStatus("signaling error");
+    ws.onclose = () => setStatus("signaling disconnected");
+  }
+
+  // ===== MediaPipe Hands =====
+  let hands = null;
+  let cam = null;
+  let running = false;
+
+  function packAndSend(localL1, localL2) {
+    if (!dc || dc.readyState !== "open") return;
+
+    // Pack 2 hands into one binary message: 126 floats total
+    const out = new Float32Array(126);
+
+    // Helper to write 63 floats or zeros
+    function writeHand(landmarks, offset) {
+      if (!landmarks) return; // zeros already
+      for (let i = 0; i < 21; i++) {
+        out[offset + i*3 + 0] = landmarks[i].x;
+        out[offset + i*3 + 1] = landmarks[i].y;
+        out[offset + i*3 + 2] = landmarks[i].z;
+      }
+    }
+
+    writeHand(localL1, 0);
+    writeHand(localL2, 63);
+
+    dc.send(out.buffer);
+  }
+
+  async function start() {
+    if (running) return;
+    running = true;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    connectSignaling();
+
+    setStatus("starting camera…");
+
+    hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: Number(maxHandsSel.value),
+      modelComplexity: 1,
+      minDetectionConfidence: Number(confRange.value),
+      minTrackingConfidence: Number(confRange.value),
+    });
+
+    hands.onResults((results) => {
+      const L = results.multiHandLandmarks || [];
+
+      updateHand(localHand1, L[0]);
+      updateHand(localHand2, L[1]);
+
+      // Send both hands (if present)
+      packAndSend(L[0], L[1]);
+
+      if (L.length) setStatus(`tracking (${L.length} local hand${L.length>1?"s":""}, peers=${peerCount})`);
+    });
+
+    cam = new Camera(video, {
+      onFrame: async () => {
+        if (!running) return;
+        await hands.send({ image: video });
+      },
+      width: 640,
+      height: 480
+    });
+
+    await cam.start();
+  }
+
+  function stop() {
+    running = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+
+    localHand1.group.visible = false;
+    localHand2.group.visible = false;
+    remoteHand1.group.visible = false;
+    remoteHand2.group.visible = false;
+
+    if (ws) { try { ws.close(); } catch {} }
+    ws = null;
+
+    resetRTC();
+
+    const stream = video.srcObject;
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    cam = null;
+    hands = null;
+
+    setStatus("stopped");
+  }
+
+  startBtn.addEventListener("click", start);
+  stopBtn.addEventListener("click", stop);
+
+  // ===== Render loop =====
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera3D);
+  }
+  animate();
+</script>
+</body>
+</html>
