@@ -1,429 +1,123 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>3D Hands Multiplayer</title>
+// server.js
+// Node + WebSocket signaling server + static file hosting
+// Put this in your project root (same level as package.json)
 
-<style>
-  html, body { margin:0; height:100%; background:#0b0f14; color:#e6e6e6; font-family: system-ui, Segoe UI, Roboto, Arial; }
-  #wrap { display:grid; grid-template-columns: 320px 1fr; height:100%; }
-  #left { padding:12px; border-right:1px solid rgba(255,255,255,0.10); overflow:auto; }
-  #right { position:relative; }
-  video { width:100%; border-radius:12px; background:#000; transform: scaleX(-1); }
-  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
-  button { padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#fff; cursor:pointer; }
-  button:disabled { opacity:0.5; cursor:not-allowed; }
-  #status { font-size:12px; opacity:0.85; margin-top:8px; white-space:pre-wrap; }
-  input { background:rgba(255,255,255,0.08); color:#fff; border:1px solid rgba(255,255,255,0.15); border-radius:10px; padding:8px 10px; width:140px; }
-  code { background:rgba(255,255,255,0.10); padding:2px 6px; border-radius:8px; }
-</style>
+import http from "http";
+import fs from "fs";
+import path from "path";
+import url from "url";
+import { WebSocketServer } from "ws";
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
+const PUBLIC_DIR = path.join(__dirname, "public");
+
+function serveFile(req, res) {
+  const reqPath = req.url.split("?")[0];
+  const safePath = reqPath === "/" ? "/index.html" : reqPath;
+
+  const filePath = path.join(PUBLIC_DIR, safePath);
+  if (!filePath.startsWith(PUBLIC_DIR)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const mime =
+      ext === ".html" ? "text/html" :
+      ext === ".js" ? "text/javascript" :
+      ext === ".css" ? "text/css" :
+      "application/octet-stream";
+    res.writeHead(200, { "Content-Type": mime });
+    res.end(data);
+  });
+}
+
+const server = http.createServer(serveFile);
+const wss = new WebSocketServer({ server });
+
+// roomId -> { clients: Map(clientId -> ws), hostId: string|null }
+const rooms = new Map();
+
+function roomGet(roomId) {
+  if (!rooms.has(roomId)) rooms.set(roomId, { clients: new Map(), hostId: null });
+  return rooms.get(roomId);
+}
+function broadcast(roomId, obj, exceptWs = null) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const msg = JSON.stringify(obj);
+  for (const ws of room.clients.values()) {
+    if (ws !== exceptWs && ws.readyState === 1) ws.send(msg);
   }
 }
-</script>
-</head>
+function rid() {
+  return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+}
 
-<body>
-<div id="wrap">
-  <div id="left">
-    <h3 style="margin:0 0 10px;">3D Hands (Multiplayer)</h3>
+wss.on("connection", (ws) => {
+  ws.roomId = null;
+  ws.clientId = null;
 
-    <video id="video" autoplay playsinline muted></video>
+  ws.on("message", (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
 
-    <div class="row">
-      <button id="start">Start</button>
-      <button id="stop" disabled>Stop</button>
-    </div>
+    if (msg.type === "join") {
+      const roomId = String(msg.roomId || "room1");
+      const clientId = String(msg.clientId || rid());
 
-    <div class="row">
-      <label style="display:flex;align-items:center;gap:8px;font-size:12px;opacity:0.9;">
-        Room <input id="room" />
-      </label>
-    </div>
+      ws.roomId = roomId;
+      ws.clientId = clientId;
 
-    <div style="font-size:12px;opacity:0.75;margin-top:10px;line-height:1.4;">
-      Share link with friend:<br/>
-      <code id="share"></code>
-    </div>
+      const room = roomGet(roomId);
+      room.clients.set(clientId, ws);
 
-    <div id="status">idle</div>
-  </div>
+      if (!room.hostId) room.hostId = clientId;
 
-  <div id="right"></div>
-</div>
+      ws.send(JSON.stringify({
+        type: "joined",
+        roomId,
+        clientId,
+        isHost: room.hostId === clientId,
+        peerCount: room.clients.size
+      }));
 
-<script type="module">
-  import * as THREE from "three";
-  import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-  import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-
-  const video = document.getElementById("video");
-  const startBtn = document.getElementById("start");
-  const stopBtn  = document.getElementById("stop");
-  const statusEl = document.getElementById("status");
-  const container = document.getElementById("right");
-  const roomInput = document.getElementById("room");
-  const shareEl = document.getElementById("share");
-
-  const setStatus = (s) => statusEl.textContent = s;
-
-  // ===== Room URL handling =====
-  const urlRoom = new URLSearchParams(location.search).get("room") || "test";
-  roomInput.value = urlRoom;
-
-  function updateShare() {
-    const room = roomInput.value.trim() || "test";
-    const u = new URL(location.href);
-    u.searchParams.set("room", room);
-    history.replaceState({}, "", u.toString());
-    shareEl.textContent = u.toString();
-  }
-  roomInput.addEventListener("input", updateShare);
-  updateShare();
-
-  // ===== Three.js =====
-  const renderer = new THREE.WebGLRenderer({ antialias:true });
-  renderer.setPixelRatio(devicePixelRatio);
-  container.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b0f14);
-
-  const camera3D = new THREE.PerspectiveCamera(60, 1, 0.01, 30);
-  camera3D.position.set(0, 0.2, 1.1);
-
-  const controls = new OrbitControls(camera3D, renderer.domElement);
-  controls.enableDamping = true;
-  controls.target.set(0, 0.12, 0);
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-  const grid = new THREE.GridHelper(2, 20, 0xffffff, 0xffffff);
-  grid.material.opacity = 0.12;
-  grid.material.transparent = true;
-  scene.add(grid);
-
-  function resize() {
-    const w = container.clientWidth || 1;
-    const h = container.clientHeight || 1;
-    renderer.setSize(w, h);
-    camera3D.aspect = w / h;
-    camera3D.updateProjectionMatrix();
-  }
-  window.addEventListener("resize", resize);
-  resize();
-
-  // ===== Hand dots =====
-  function makeJoints(colorHex) {
-    const joints = [];
-    const jointGeo = new THREE.SphereGeometry(0.01, 12, 12);
-    const jointMat = new THREE.MeshStandardMaterial({ color: colorHex });
-    for (let i = 0; i < 21; i++) {
-      const m = new THREE.Mesh(jointGeo, jointMat);
-      m.visible = false;
-      scene.add(m);
-      joints.push(m);
-    }
-    return joints;
-  }
-
-  // Local hands
-  const localA = makeJoints(0x4aa3ff);
-  const localB = makeJoints(0x4aa3ff);
-
-  // Remote hands (different colors)
-  const remoteA = makeJoints(0xff4aa3);
-  const remoteB = makeJoints(0xffa34a);
-
-  function mpToWorld(lm) {
-    return new THREE.Vector3(
-      (lm.x - 0.5) * 0.9,
-      (0.5 - lm.y) * 0.9,
-      (lm.z) * 0.9
-    );
-  }
-
-  function hideJoints(joints) {
-    for (const j of joints) j.visible = false;
-  }
-
-  function drawHand(handLandmarks, joints) {
-    for (let i = 0; i < 21; i++) {
-      joints[i].visible = true;
-      joints[i].position.copy(mpToWorld(handLandmarks[i]));
-    }
-  }
-
-  // ===== MediaPipe Tasks Vision =====
-  let stream = null;
-  let running = false;
-  let handLandmarker = null;
-  let lastVideoTime = -1;
-
-  async function initLandmarker() {
-    const vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-    );
-
-    handLandmarker = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-      },
-      runningMode: "VIDEO",
-      numHands: 2
-    });
-  }
-
-  // ===== Multiplayer: WebSocket signaling + WebRTC DataChannel =====
-  let ws = null;
-  let pc = null;
-  let dc = null;
-  let clientId = (crypto?.randomUUID?.() || Math.random().toString(16).slice(2));
-  let isHost = false;
-  let peerCount = 1;
-  let rtcStarted = false;
-
-  function wsUrl() {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${location.host}`;
-  }
-
-  function resetRTC() {
-    rtcStarted = false;
-    try { dc?.close(); } catch {}
-    try { pc?.close(); } catch {}
-    dc = null;
-    pc = null;
-  }
-
-  function makePC() {
-    const peer = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-
-    peer.onicecandidate = (e) => {
-      if (e.candidate && ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: "ice", candidate: e.candidate }));
-      }
-    };
-
-    peer.ondatachannel = (ev) => {
-      dc = ev.channel;
-      wireDC();
-    };
-
-    return peer;
-  }
-
-  function wireDC() {
-    if (!dc) return;
-    dc.binaryType = "arraybuffer";
-    dc.onopen = () => setStatus(`connected (DataChannel open, peers=${peerCount})`);
-    dc.onmessage = (ev) => {
-      const buf = new Float32Array(ev.data);
-      // 126 floats: remote hand1 then remote hand2
-      const h1 = buf.subarray(0, 63);
-      const h2 = buf.subarray(63, 126);
-      applyPose(h1, remoteA);
-      applyPose(h2, remoteB);
-    };
-  }
-
-  function applyPose(pose63, joints) {
-    // All zeros means "no hand"
-    let sum = 0;
-    for (let i = 0; i < 63; i++) sum += Math.abs(pose63[i]);
-    if (sum < 1e-6) { hideJoints(joints); return; }
-
-    for (let i = 0; i < 21; i++) {
-      joints[i].visible = true;
-      const x = pose63[i*3+0];
-      const y = pose63[i*3+1];
-      const z = pose63[i*3+2];
-      joints[i].position.copy(mpToWorld({ x, y, z }));
-    }
-  }
-
-  async function hostStartRTC() {
-    if (!isHost || rtcStarted) return;
-    if (peerCount < 2) return;
-
-    rtcStarted = true;
-    resetRTC();
-    pc = makePC();
-    dc = pc.createDataChannel("hands");
-    wireDC();
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    ws.send(JSON.stringify({ type: "offer", offer }));
-  }
-
-  async function handleOffer(offer) {
-    resetRTC();
-    pc = makePC();
-    await pc.setRemoteDescription(offer);
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    ws.send(JSON.stringify({ type: "answer", answer }));
-  }
-
-  async function handleAnswer(answer) {
-    if (!pc) return;
-    await pc.setRemoteDescription(answer);
-  }
-
-  async function handleICE(candidate) {
-    if (!pc) return;
-    try { await pc.addIceCandidate(candidate); } catch {}
-  }
-
-  function connectSignaling() {
-    const room = roomInput.value.trim() || "test";
-    resetRTC();
-
-    ws = new WebSocket(wsUrl());
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "join", roomId: room, clientId }));
-      setStatus("signaling connected…");
-    };
-
-    ws.onmessage = async (ev) => {
-      const msg = JSON.parse(ev.data);
-
-      if (msg.type === "joined") {
-        isHost = !!msg.isHost;
-        peerCount = msg.peerCount || 1;
-        if (isHost) hostStartRTC();
-        return;
-      }
-
-      if (msg.type === "room") {
-        peerCount = msg.peerCount || peerCount;
-        const hostId = msg.hostId || null;
-        isHost = hostId === clientId;
-        if (isHost) hostStartRTC();
-        return;
-      }
-
-      if (msg.type === "offer") await handleOffer(msg.offer);
-      if (msg.type === "answer") await handleAnswer(msg.answer);
-      if (msg.type === "ice") await handleICE(msg.candidate);
-    };
-
-    ws.onerror = () => setStatus("signaling error");
-    ws.onclose = () => setStatus("signaling disconnected");
-  }
-
-  function packAndSend(hand1, hand2) {
-    if (!dc || dc.readyState !== "open") return;
-
-    const out = new Float32Array(126);
-
-    function writeHand(hand, offset) {
-      if (!hand) return; // zeros already
-      for (let i = 0; i < 21; i++) {
-        out[offset + i*3 + 0] = hand[i].x;
-        out[offset + i*3 + 1] = hand[i].y;
-        out[offset + i*3 + 2] = hand[i].z;
-      }
+      broadcast(roomId, { type: "room", peerCount: room.clients.size, hostId: room.hostId });
+      return;
     }
 
-    writeHand(hand1, 0);
-    writeHand(hand2, 63);
+    if (ws.roomId) broadcast(ws.roomId, msg, ws);
+  });
 
-    dc.send(out.buffer);
-  }
+  ws.on("close", () => {
+    const { roomId, clientId } = ws;
+    if (!roomId || !clientId) return;
 
-  // ===== Start/Stop =====
-  async function start() {
-    try {
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
+    const room = rooms.get(roomId);
+    if (!room) return;
 
-      connectSignaling();
+    room.clients.delete(clientId);
 
-      setStatus("requesting camera permission…");
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false
-      });
-      video.srcObject = stream;
-      await video.play();
-
-      setStatus("loading hand model…");
-      if (!handLandmarker) await initLandmarker();
-
-      running = true;
-      lastVideoTime = -1;
-      setStatus("running…");
-
-      requestAnimationFrame(loop);
-    } catch (e) {
-      console.error(e);
-      setStatus(`error: ${e.name}\n${e.message}`);
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-    }
-  }
-
-  function stop() {
-    running = false;
-    hideJoints(localA); hideJoints(localB);
-    hideJoints(remoteA); hideJoints(remoteB);
-
-    if (stream) stream.getTracks().forEach(t => t.stop());
-    stream = null;
-    video.srcObject = null;
-
-    try { ws?.close(); } catch {}
-    ws = null;
-    resetRTC();
-
-    setStatus("stopped");
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-  }
-
-  function loop() {
-    if (!running) return;
-
-    if (video.currentTime !== lastVideoTime) {
-      lastVideoTime = video.currentTime;
-      const nowMs = performance.now();
-
-      const result = handLandmarker.detectForVideo(video, nowMs);
-      const hands = result?.landmarks || [];
-
-      hideJoints(localA); hideJoints(localB);
-
-      if (hands[0]) drawHand(hands[0], localA);
-      if (hands[1]) drawHand(hands[1], localB);
-
-      // Send both hands to the other player
-      packAndSend(hands[0] || null, hands[1] || null);
-
-      setStatus(`local=${hands.length} hands | peers=${peerCount} | ${dc?.readyState === "open" ? "P2P connected" : "connecting…"}`);
+    if (room.hostId === clientId) {
+      const next = room.clients.keys().next();
+      room.hostId = next.done ? null : next.value;
     }
 
-    requestAnimationFrame(loop);
-  }
+    if (room.clients.size === 0) {
+      rooms.delete(roomId);
+      return;
+    }
 
-  startBtn.addEventListener("click", start);
-  stopBtn.addEventListener("click", stop);
+    broadcast(roomId, { type: "room", peerCount: room.clients.size, hostId: room.hostId });
+  });
+});
 
-  // Render loop
-  function animate() {
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera3D);
-  }
-  animate();
-</script>
-</body>
-</html>
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => console.log(`Open http://localhost:${PORT}`));
