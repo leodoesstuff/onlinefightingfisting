@@ -1,3 +1,7 @@
+// server.js
+// Node + WebSocket signaling server + static file hosting
+// Put this in your project root (same level as package.json)
+
 import http from "http";
 import fs from "fs";
 import path from "path";
@@ -24,14 +28,12 @@ function serveFile(req, res) {
       res.end("Not found");
       return;
     }
-
     const ext = path.extname(filePath).toLowerCase();
     const mime =
       ext === ".html" ? "text/html" :
       ext === ".js" ? "text/javascript" :
       ext === ".css" ? "text/css" :
       "application/octet-stream";
-
     res.writeHead(200, { "Content-Type": mime });
     res.end(data);
   });
@@ -43,19 +45,20 @@ const wss = new WebSocketServer({ server });
 // roomId -> { clients: Map(clientId -> ws), hostId: string|null }
 const rooms = new Map();
 
-function getRoom(roomId) {
+function roomGet(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, { clients: new Map(), hostId: null });
   return rooms.get(roomId);
 }
-
-function broadcastRoom(roomId, obj, exceptWs = null) {
+function broadcast(roomId, obj, exceptWs = null) {
   const room = rooms.get(roomId);
   if (!room) return;
   const msg = JSON.stringify(obj);
-
   for (const ws of room.clients.values()) {
     if (ws !== exceptWs && ws.readyState === 1) ws.send(msg);
   }
+}
+function rid() {
+  return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
 }
 
 wss.on("connection", (ws) => {
@@ -64,27 +67,20 @@ wss.on("connection", (ws) => {
 
   ws.on("message", (raw) => {
     let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
 
-    // Join room
     if (msg.type === "join") {
       const roomId = String(msg.roomId || "room1");
-      const clientId = String(msg.clientId || cryptoRandomId());
+      const clientId = String(msg.clientId || rid());
 
       ws.roomId = roomId;
       ws.clientId = clientId;
 
-      const room = getRoom(roomId);
+      const room = roomGet(roomId);
       room.clients.set(clientId, ws);
 
-      // Assign host if none
       if (!room.hostId) room.hostId = clientId;
 
-      // Tell joiner their role + current count
       ws.send(JSON.stringify({
         type: "joined",
         roomId,
@@ -93,25 +89,15 @@ wss.on("connection", (ws) => {
         peerCount: room.clients.size
       }));
 
-      // Tell everyone count/host
-      broadcastRoom(roomId, {
-        type: "room",
-        peerCount: room.clients.size,
-        hostId: room.hostId
-      });
-
+      broadcast(roomId, { type: "room", peerCount: room.clients.size, hostId: room.hostId });
       return;
     }
 
-    // Relay signaling messages (offer/answer/ice) to others in the same room
-    if (ws.roomId) {
-      broadcastRoom(ws.roomId, msg, ws);
-    }
+    if (ws.roomId) broadcast(ws.roomId, msg, ws);
   });
 
   ws.on("close", () => {
-    const roomId = ws.roomId;
-    const clientId = ws.clientId;
+    const { roomId, clientId } = ws;
     if (!roomId || !clientId) return;
 
     const room = rooms.get(roomId);
@@ -119,7 +105,6 @@ wss.on("connection", (ws) => {
 
     room.clients.delete(clientId);
 
-    // If host left, pick a new host
     if (room.hostId === clientId) {
       const next = room.clients.keys().next();
       room.hostId = next.done ? null : next.value;
@@ -130,20 +115,9 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    broadcastRoom(roomId, {
-      type: "room",
-      peerCount: room.clients.size,
-      hostId: room.hostId
-    });
+    broadcast(roomId, { type: "room", peerCount: room.clients.size, hostId: room.hostId });
   });
 });
 
-function cryptoRandomId() {
-  // No crypto import needed in Node 18+ usually, but keep it simple:
-  return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
-}
-
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-  console.log(`Open http://localhost:${PORT}`);
-});
+server.listen(PORT, () => console.log(`Open http://localhost:${PORT}`));
