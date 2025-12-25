@@ -6,65 +6,52 @@
 <title>Hand Fight Online</title>
 
 <style>
-  html, body {
-    margin: 0;
-    height: 100%;
-    background: #0b0f14;
-    color: #e6e6e6;
-    font-family: system-ui, Arial;
+  :root{
+    --bg:#0b0f14;
+    --panel:#0f1622;
+    --panel2:#0e1a2b;
+    --text:#e8edf6;
+    --muted:rgba(232,237,246,.7);
+    --line:rgba(255,255,255,.10);
+    --btn:#2a5cff;
+    --btn2:rgba(255,255,255,.08);
+    --good:#3ddc84;
+    --bad:#ff5a73;
   }
-
-  #wrap {
-    display: grid;
-    grid-template-columns: 340px 1fr;
-    height: 100%;
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Arial}
+  #wrap{display:grid;grid-template-columns:360px 1fr;height:100%}
+  #left{padding:14px;border-right:1px solid var(--line);background:linear-gradient(180deg,var(--panel),rgba(15,22,34,.6))}
+  #right{position:relative}
+  h1{font-size:16px;margin:0 0 10px;font-weight:700;letter-spacing:.2px}
+  .card{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:16px;padding:12px}
+  .stack{display:flex;flex-direction:column;gap:10px}
+  video{width:100%;border-radius:14px;background:#000;transform:scaleX(-1)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button{
+    padding:10px 12px;border-radius:12px;border:1px solid var(--line);
+    background:var(--btn2);color:var(--text);cursor:pointer;
   }
-
-  #left {
-    padding: 14px;
-    border-right: 1px solid rgba(255,255,255,0.12);
+  button.primary{background:var(--btn);border-color:rgba(42,92,255,.55)}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  input[type="text"]{
+    width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);
+    background:rgba(0,0,0,.22);color:var(--text);outline:none;
   }
-
-  #right {
-    position: relative;
+  .label{font-size:12px;color:var(--muted)}
+  .status{font-size:12px;color:var(--muted);white-space:pre-wrap;line-height:1.35}
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:6px 10px;border-radius:999px;border:1px solid var(--line);
+    background:rgba(255,255,255,.05);font-size:12px;color:var(--muted)
   }
-
-  video {
-    width: 100%;
-    border-radius: 14px;
-    background: black;
-    transform: scaleX(-1);
-  }
-
-  button {
-    margin-top: 10px;
-    padding: 10px 14px;
-    border-radius: 12px;
-    border: none;
-    background: #2a5cff;
-    color: white;
-    cursor: pointer;
-  }
-
-  #status {
-    margin-top: 10px;
-    font-size: 12px;
-    opacity: 0.8;
-  }
-
-  .bar {
-    margin-top: 10px;
-    height: 14px;
-    background: #333;
-    border-radius: 999px;
-    overflow: hidden;
-  }
-
-  .fill {
-    height: 100%;
-    background: #4caf50;
-    width: 100%;
-  }
+  .dot{width:8px;height:8px;border-radius:99px;background:rgba(255,255,255,.35)}
+  .dot.ok{background:var(--good)}
+  .dot.bad{background:var(--bad)}
+  .sliderRow{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}
+  input[type="range"]{width:100%}
+  .small{font-size:12px;color:var(--muted)}
+  .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;background:rgba(255,255,255,.08);border:1px solid var(--line);padding:2px 6px;border-radius:8px}
 </style>
 
 <script type="importmap">
@@ -80,124 +67,605 @@
 <body>
 <div id="wrap">
   <div id="left">
-    <h3>Hand Fight Online</h3>
+    <div class="stack">
+      <h1>Hand Fight Online</h1>
 
-    <video id="video" autoplay playsinline muted></video>
+      <div class="card stack">
+        <video id="video" autoplay playsinline muted></video>
+        <audio id="remoteAudio" autoplay></audio>
 
-    <button id="start">Start (Camera + Mic)</button>
+        <div class="row">
+          <button id="start" class="primary">Start (camera + mic)</button>
+          <button id="stop" disabled>Stop</button>
+          <button id="mute" disabled>Mute mic</button>
+        </div>
 
-    <div class="bar"><div id="hpYou" class="fill"></div></div>
-    <div class="bar"><div id="hpOp" class="fill"></div></div>
+        <div class="row">
+          <span class="pill"><span id="sigDot" class="dot"></span><span id="sigText">Signaling: off</span></span>
+          <span class="pill"><span id="p2pDot" class="dot"></span><span id="p2pText">P2P: off</span></span>
+        </div>
 
-    <div id="status">idle</div>
+        <div class="status" id="status">idle</div>
+      </div>
+
+      <div class="card stack">
+        <div class="label">Room</div>
+        <input id="room" type="text" spellcheck="false" />
+        <div class="row">
+          <button id="copy">Copy link</button>
+          <span class="small">Tip: open same link on 2 devices</span>
+        </div>
+        <div class="small">URL: <span class="kbd" id="share"></span></div>
+      </div>
+
+      <div class="card stack">
+        <div class="row">
+          <label class="pill" style="cursor:pointer;">
+            <input id="faceEachOther" type="checkbox" checked style="margin:0 8px 0 0;" />
+            Face each other
+          </label>
+        </div>
+
+        <div class="label">More dots</div>
+        <div class="sliderRow">
+          <input id="dots" type="range" min="0" max="10" step="1" value="6" />
+          <span class="pill"><span id="dotsVal">6</span></span>
+        </div>
+
+        <div class="small">
+          If it lags, lower dots. 6 is a good default.
+        </div>
+      </div>
+
+      <div class="small">
+        Note: <span class="kbd">/favicon.ico</span> 404 is harmless.
+      </div>
+    </div>
   </div>
 
   <div id="right"></div>
 </div>
 
 <script type="module">
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+  import * as THREE from "three";
+  import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+  import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
-/* ===== UI ===== */
-const video = document.getElementById("video");
-const statusEl = document.getElementById("status");
-const hpYouEl = document.getElementById("hpYou");
-const hpOpEl = document.getElementById("hpOp");
+  // ===== UI =====
+  const video = document.getElementById("video");
+  const remoteAudio = document.getElementById("remoteAudio");
 
-/* ===== THREE ===== */
-const container = document.getElementById("right");
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(container.clientWidth, container.clientHeight);
-container.appendChild(renderer.domElement);
+  const startBtn = document.getElementById("start");
+  const stopBtn  = document.getElementById("stop");
+  const muteBtn  = document.getElementById("mute");
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0f14);
+  const statusEl = document.getElementById("status");
+  const roomInput = document.getElementById("room");
+  const shareEl = document.getElementById("share");
+  const copyBtn = document.getElementById("copy");
 
-const cam = new THREE.PerspectiveCamera(60, container.clientWidth/container.clientHeight, 0.01, 10);
-cam.position.set(0, 0.2, 1);
+  const sigDot = document.getElementById("sigDot");
+  const sigText = document.getElementById("sigText");
+  const p2pDot = document.getElementById("p2pDot");
+  const p2pText = document.getElementById("p2pText");
 
-const controls = new OrbitControls(cam, renderer.domElement);
-scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const dotsRange = document.getElementById("dots");
+  const dotsVal = document.getElementById("dotsVal");
+  const faceEachOtherChk = document.getElementById("faceEachOther");
 
-/* ===== HAND DOTS ===== */
-const dots = [];
-const geo = new THREE.SphereGeometry(0.012, 12, 12);
-const mat = new THREE.MeshStandardMaterial({ color: 0x4aa3ff });
-
-for (let i = 0; i < 21; i++) {
-  const m = new THREE.Mesh(geo, mat);
-  scene.add(m);
-  dots.push(m);
-}
-
-function mpToWorld(lm) {
-  return new THREE.Vector3(
-    (lm.x - 0.5) * 0.9,
-    (0.5 - lm.y) * 0.9,
-    lm.z * 0.9
-  );
-}
-
-/* ===== MEDIAPIPE ===== */
-let handLandmarker;
-let lastTime = -1;
-
-async function initHands() {
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-  );
-
-  handLandmarker = await HandLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-    },
-    runningMode: "VIDEO",
-    numHands: 1
-  });
-}
-
-/* ===== START ===== */
-document.getElementById("start").onclick = async () => {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: true,
-    audio: true
-  });
-  video.srcObject = stream;
-  await video.play();
-
-  await initHands();
-  statusEl.textContent = "tracking…";
-  loop();
-};
-
-function loop() {
-  if (video.currentTime !== lastTime) {
-    lastTime = video.currentTime;
-    const res = handLandmarker.detectForVideo(video, performance.now());
-    const hand = res.landmarks?.[0];
-
-    if (hand) {
-      for (let i = 0; i < 21; i++) {
-        dots[i].visible = true;
-        dots[i].position.copy(mpToWorld(hand[i]));
-      }
-    } else {
-      dots.forEach(d => d.visible = false);
-    }
+  function setStatus(s){ statusEl.textContent = s; }
+  function setSig(ok, text){
+    sigDot.classList.toggle("ok", ok);
+    sigDot.classList.toggle("bad", !ok && text.includes("error"));
+    sigText.textContent = `Signaling: ${text}`;
+  }
+  function setP2P(ok, text){
+    p2pDot.classList.toggle("ok", ok);
+    p2pDot.classList.toggle("bad", !ok && text.includes("failed"));
+    p2pText.textContent = `P2P: ${text}`;
   }
 
-  renderer.render(scene, cam);
-  requestAnimationFrame(loop);
-}
+  dotsVal.textContent = dotsRange.value;
+  dotsRange.addEventListener("input", () => dotsVal.textContent = dotsRange.value);
 
-window.addEventListener("resize", () => {
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  cam.aspect = container.clientWidth / container.clientHeight;
-  cam.updateProjectionMatrix();
-});
+  // Room from URL
+  const urlRoom = new URLSearchParams(location.search).get("room") || "test";
+  roomInput.value = urlRoom;
+
+  function updateShare(){
+    const room = roomInput.value.trim() || "test";
+    const u = new URL(location.href);
+    u.searchParams.set("room", room);
+    history.replaceState({}, "", u.toString());
+    shareEl.textContent = u.toString();
+  }
+  roomInput.addEventListener("input", updateShare);
+  updateShare();
+
+  copyBtn.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(shareEl.textContent);
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => copyBtn.textContent = "Copy link", 900);
+    } catch {
+      copyBtn.textContent = "Copy failed";
+      setTimeout(() => copyBtn.textContent = "Copy link", 900);
+    }
+  };
+
+  // ===== Three.js =====
+  const container = document.getElementById("right");
+  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setPixelRatio(devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0f14);
+
+  const camera3D = new THREE.PerspectiveCamera(60, 1, 0.01, 30);
+  camera3D.position.set(0, 0.25, 1.15);
+
+  const controls = new OrbitControls(camera3D, renderer.domElement);
+  controls.enableDamping = true;
+  controls.target.set(0, 0.15, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const grid = new THREE.GridHelper(2, 20, 0xffffff, 0xffffff);
+  grid.material.opacity = 0.10;
+  grid.material.transparent = true;
+  scene.add(grid);
+
+  function resize(){
+    const w = container.clientWidth || 1;
+    const h = container.clientHeight || 1;
+    renderer.setSize(w, h);
+    camera3D.aspect = w / h;
+    camera3D.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ===== Hand dot clouds with interpolation =====
+  const CONNECTIONS = [
+    [0,1],[1,2],[2,3],[3,4],
+    [0,5],[5,6],[6,7],[7,8],
+    [0,9],[9,10],[10,11],[11,12],
+    [0,13],[13,14],[14,15],[15,16],
+    [0,17],[17,18],[18,19],[19,20],
+    [5,9],[9,13],[13,17]
+  ];
+
+  function mpToWorld(lm){
+    return new THREE.Vector3(
+      (lm.x - 0.5) * 0.9,
+      (0.5 - lm.y) * 0.9,
+      (lm.z) * 0.9
+    );
+  }
+  function mpToWorldRemote(lm){
+    const p = mpToWorld(lm);
+    if (faceEachOtherChk.checked) p.x = -p.x;
+    return p;
+  }
+
+  function makeDotCloud(maxDots, colorHex){
+    const geom = new THREE.BufferGeometry();
+    const positions = new Float32Array(maxDots * 3);
+    geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geom.setDrawRange(0, 0);
+    const mat = new THREE.PointsMaterial({ size: 0.012, color: colorHex });
+    const points = new THREE.Points(geom, mat);
+    scene.add(points);
+    return { points, geom, positions, maxDots };
+  }
+
+  function maxDotsFor(dpb){
+    return 21 + CONNECTIONS.length * dpb;
+  }
+
+  let DOTS_PER_BONE = Number(dotsRange.value);
+
+  let local1 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0x4aa3ff);
+  let local2 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0x4aa3ff);
+  let remote1 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0xff4aa3);
+  let remote2 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0xffa34a);
+
+  function rebuildCloudsIfNeeded(){
+    const next = Number(dotsRange.value);
+    if (next === DOTS_PER_BONE) return;
+    DOTS_PER_BONE = next;
+
+    scene.remove(local1.points); scene.remove(local2.points);
+    scene.remove(remote1.points); scene.remove(remote2.points);
+
+    local1 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0x4aa3ff);
+    local2 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0x4aa3ff);
+    remote1 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0xff4aa3);
+    remote2 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0xffa34a);
+  }
+  dotsRange.addEventListener("input", rebuildCloudsIfNeeded);
+
+  function fillCloud(hand, cloud, worldFn){
+    if (!hand){
+      cloud.geom.setDrawRange(0, 0);
+      cloud.geom.attributes.position.needsUpdate = true;
+      return;
+    }
+
+    let idx = 0;
+
+    for (let i=0;i<21;i++){
+      const p = worldFn(hand[i]);
+      cloud.positions[idx++] = p.x;
+      cloud.positions[idx++] = p.y;
+      cloud.positions[idx++] = p.z;
+    }
+
+    for (const [a,b] of CONNECTIONS){
+      const pa = worldFn(hand[a]);
+      const pb = worldFn(hand[b]);
+      for (let t=1;t<=DOTS_PER_BONE;t++){
+        const k = t/(DOTS_PER_BONE+1);
+        cloud.positions[idx++] = pa.x + (pb.x-pa.x)*k;
+        cloud.positions[idx++] = pa.y + (pb.y-pa.y)*k;
+        cloud.positions[idx++] = pa.z + (pb.z-pa.z)*k;
+      }
+    }
+
+    cloud.geom.setDrawRange(0, idx/3);
+    cloud.geom.attributes.position.needsUpdate = true;
+  }
+
+  // ===== MediaPipe Tasks Vision =====
+  let handLandmarker = null;
+  let lastVideoTime = -1;
+
+  async function initHandLandmarker(){
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+    );
+
+    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+      },
+      runningMode: "VIDEO",
+      numHands: 2
+    });
+  }
+
+  function videoReady(){
+    return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+  }
+
+  // ===== Multiplayer: signaling + WebRTC (audio + data) =====
+  let ws = null;
+  let pc = null;
+  let dc = null;
+
+  let stream = null;
+  let running = false;
+
+  const clientId = (crypto?.randomUUID?.() || Math.random().toString(16).slice(2));
+  let isHost = false;
+  let peerCount = 1;
+  let rtcStarted = false;
+
+  let remoteHand1 = null;
+  let remoteHand2 = null;
+
+  function wsUrl(){
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${location.host}`;
+  }
+
+  function resetRTC(){
+    rtcStarted = false;
+    try { dc?.close(); } catch {}
+    try { pc?.close(); } catch {}
+    dc = null;
+    pc = null;
+    setP2P(false, "off");
+  }
+
+  function makePC(){
+    const peer = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+
+    peer.onicecandidate = (e) => {
+      if (e.candidate && ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type:"ice", candidate:e.candidate }));
+      }
+    };
+
+    peer.ondatachannel = (ev) => {
+      dc = ev.channel;
+      wireDC();
+    };
+
+    peer.ontrack = (event) => {
+      const [remoteStream] = event.streams;
+      if (remoteStream) remoteAudio.srcObject = remoteStream;
+    };
+
+    return peer;
+  }
+
+  function wireDC(){
+    if (!dc) return;
+    dc.binaryType = "arraybuffer";
+
+    dc.onopen = () => setP2P(true, "connected");
+    dc.onclose = () => setP2P(false, "closed");
+    dc.onerror = () => setP2P(false, "failed");
+
+    dc.onmessage = (ev) => {
+      const buf = new Float32Array(ev.data);
+      remoteHand1 = poseToLandmarks(buf.subarray(0, 63));
+      remoteHand2 = poseToLandmarks(buf.subarray(63, 126));
+    };
+  }
+
+  function poseToLandmarks(pose63){
+    let sum = 0;
+    for (let i=0;i<63;i++) sum += Math.abs(pose63[i]);
+    if (sum < 1e-6) return null;
+
+    const out = [];
+    for (let i=0;i<21;i++){
+      out.push({
+        x: pose63[i*3+0],
+        y: pose63[i*3+1],
+        z: pose63[i*3+2]
+      });
+    }
+    return out;
+  }
+
+  function packAndSend(h1, h2){
+    if (!dc || dc.readyState !== "open") return;
+
+    const out = new Float32Array(126);
+
+    function writeHand(hand, offset){
+      if (!hand) return;
+      for (let i=0;i<21;i++){
+        out[offset + i*3 + 0] = hand[i].x;
+        out[offset + i*3 + 1] = hand[i].y;
+        out[offset + i*3 + 2] = hand[i].z;
+      }
+    }
+
+    writeHand(h1, 0);
+    writeHand(h2, 63);
+
+    dc.send(out.buffer);
+  }
+
+  function connectSignaling(){
+    const room = roomInput.value.trim() || "test";
+    resetRTC();
+
+    ws = new WebSocket(wsUrl());
+    ws.onopen = () => {
+      setSig(true, "connected");
+      ws.send(JSON.stringify({ type:"join", roomId: room, clientId }));
+      maybeStartHostRTC();
+    };
+    ws.onerror = () => setSig(false, "error");
+    ws.onclose = () => setSig(false, "off");
+
+    ws.onmessage = async (ev) => {
+      const msg = JSON.parse(ev.data);
+
+      if (msg.type === "joined") {
+        isHost = !!msg.isHost;
+        peerCount = msg.peerCount || 1;
+        maybeStartHostRTC();
+        return;
+      }
+
+      if (msg.type === "room") {
+        peerCount = msg.peerCount || peerCount;
+        isHost = (msg.hostId || null) === clientId;
+        maybeStartHostRTC();
+        return;
+      }
+
+      if (msg.type === "offer") await handleOffer(msg.offer);
+      if (msg.type === "answer") await handleAnswer(msg.answer);
+      if (msg.type === "ice") await handleICE(msg.candidate);
+    };
+  }
+
+  function maybeStartHostRTC(){
+    if (!isHost) return;
+    if (peerCount < 2) return;
+    if (!stream) return;
+    if (rtcStarted) return;
+    hostStartRTC().catch(() => setP2P(false, "failed"));
+  }
+
+  async function hostStartRTC(){
+    rtcStarted = true;
+    resetRTC();
+    pc = makePC();
+
+    // Add mic tracks
+    for (const track of stream.getAudioTracks()) {
+      pc.addTrack(track, stream);
+    }
+
+    dc = pc.createDataChannel("hands");
+    wireDC();
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    ws.send(JSON.stringify({ type:"offer", offer }));
+    setP2P(false, "connecting…");
+  }
+
+  async function handleOffer(offer){
+    resetRTC();
+    pc = makePC();
+
+    for (const track of stream.getAudioTracks()) {
+      pc.addTrack(track, stream);
+    }
+
+    await pc.setRemoteDescription(offer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    ws.send(JSON.stringify({ type:"answer", answer }));
+    setP2P(false, "connecting…");
+  }
+
+  async function handleAnswer(answer){
+    if (!pc) return;
+    await pc.setRemoteDescription(answer);
+  }
+
+  async function handleICE(candidate){
+    if (!pc) return;
+    try { await pc.addIceCandidate(candidate); } catch {}
+  }
+
+  // ===== Start / Stop / Mute =====
+  let micMuted = false;
+
+  muteBtn.onclick = () => {
+    if (!stream) return;
+    micMuted = !micMuted;
+    for (const t of stream.getAudioTracks()) t.enabled = !micMuted;
+    muteBtn.textContent = micMuted ? "Unmute mic" : "Mute mic";
+  };
+
+  startBtn.onclick = async () => {
+    try {
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      muteBtn.disabled = false;
+
+      setStatus("Requesting camera + mic…");
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      video.srcObject = stream;
+
+      // Wait for metadata, then wait until frames exist
+      await new Promise((resolve) => {
+        if (video.readyState >= 1) return resolve();
+        video.onloadedmetadata = () => resolve();
+      });
+
+      await video.play();
+
+      setStatus("Loading hand tracker…");
+      if (!handLandmarker) await initHandLandmarker();
+
+      connectSignaling();
+
+      running = true;
+      lastVideoTime = -1;
+      setP2P(false, "connecting…");
+      setStatus("Running. Show your hands.");
+      requestAnimationFrame(loop);
+    } catch (e) {
+      console.error(e);
+      setStatus(`Error: ${e.name}\n${e.message}`);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      muteBtn.disabled = true;
+    }
+  };
+
+  stopBtn.onclick = () => {
+    running = false;
+
+    fillCloud(null, local1, mpToWorld);
+    fillCloud(null, local2, mpToWorld);
+    fillCloud(null, remote1, mpToWorldRemote);
+    fillCloud(null, remote2, mpToWorldRemote);
+
+    try { ws?.close(); } catch {}
+    ws = null;
+    resetRTC();
+
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+
+    remoteAudio.srcObject = null;
+    remoteHand1 = null;
+    remoteHand2 = null;
+
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    muteBtn.disabled = true;
+    muteBtn.textContent = "Mute mic";
+    micMuted = false;
+
+    setSig(false, "off");
+    setP2P(false, "off");
+    setStatus("stopped");
+  };
+
+  // ===== Main loop =====
+  function loop(){
+    if (!running) return;
+
+    // Fix for your error: only detect when video has frames
+    if (videoReady() && video.currentTime !== lastVideoTime) {
+      lastVideoTime = video.currentTime;
+
+      const nowMs = performance.now();
+      const result = handLandmarker.detectForVideo(video, nowMs);
+      const hands = result?.landmarks || [];
+
+      const h1 = hands[0] || null;
+      const h2 = hands[1] || null;
+
+      fillCloud(h1, local1, mpToWorld);
+      fillCloud(h2, local2, mpToWorld);
+
+      packAndSend(h1, h2);
+
+      fillCloud(remoteHand1, remote1, mpToWorldRemote);
+      fillCloud(remoteHand2, remote2, mpToWorldRemote);
+
+      setStatus(
+        `local hands: ${hands.length}\n` +
+        `room: ${(roomInput.value.trim()||"test")}\n` +
+        `peers: ${peerCount}`
+      );
+    }
+
+    controls.update();
+    renderer.render(scene, camera3D);
+    requestAnimationFrame(loop);
+  }
+
+  // Render loop resize safety
+  window.addEventListener("resize", resize);
+  function animate(){
+    requestAnimationFrame(animate);
+    // (render is already happening in loop; keep this light)
+  }
+  animate();
+
+  // Initial UI state
+  setSig(false, "off");
+  setP2P(false, "off");
 </script>
 </body>
 </html>
