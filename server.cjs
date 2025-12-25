@@ -1,4 +1,4 @@
-// server.js (CommonJS) — Render-safe
+// server.cjs
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -6,39 +6,48 @@ const { WebSocketServer } = require("ws");
 
 const PUBLIC_DIR = path.join(__dirname, "public");
 
-function serveFile(req, res) {
-  const reqPath = (req.url || "/").split("?")[0];
-  const safePath = reqPath === "/" ? "/index.html" : reqPath;
+function contentType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".html") return "text/html; charset=utf-8";
+  if (ext === ".js") return "text/javascript; charset=utf-8";
+  if (ext === ".css") return "text/css; charset=utf-8";
+  if (ext === ".json") return "application/json; charset=utf-8";
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".svg") return "image/svg+xml; charset=utf-8";
+  return "application/octet-stream";
+}
 
-  const filePath = path.join(PUBLIC_DIR, safePath);
+function safeJoin(base, target) {
+  const targetPath = path.normalize(target).replace(/^(\.\.(\/|\\|$))+/, "");
+  return path.join(base, targetPath);
+}
 
-  // Prevent path traversal
+function serveStatic(req, res) {
+  const rawPath = (req.url || "/").split("?")[0];
+
+  // Always map "/" to "/index.html"
+  const relPath = rawPath === "/" ? "/index.html" : rawPath;
+
+  const filePath = safeJoin(PUBLIC_DIR, relPath);
+
+  // Ensure still inside public/
   if (!filePath.startsWith(PUBLIC_DIR)) {
     res.writeHead(403);
-    res.end("Forbidden");
-    return;
+    return res.end("Forbidden");
   }
 
   fs.readFile(filePath, (err, data) => {
     if (err) {
-      res.writeHead(404);
-      res.end("Not found");
-      return;
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end("Not found");
     }
-
-    const ext = path.extname(filePath).toLowerCase();
-    const mime =
-      ext === ".html" ? "text/html; charset=utf-8" :
-      ext === ".js" ? "text/javascript; charset=utf-8" :
-      ext === ".css" ? "text/css; charset=utf-8" :
-      "application/octet-stream";
-
-    res.writeHead(200, { "Content-Type": mime });
+    res.writeHead(200, { "Content-Type": contentType(filePath) });
     res.end(data);
   });
 }
 
-const server = http.createServer(serveFile);
+const server = http.createServer(serveStatic);
 const wss = new WebSocketServer({ server });
 
 // roomId -> { clients: Map(clientId -> ws), hostId }
@@ -79,7 +88,6 @@ wss.on("connection", (ws) => {
 
       const room = roomGet(roomId);
       room.clients.set(clientId, ws);
-
       if (!room.hostId) room.hostId = clientId;
 
       ws.send(JSON.stringify({
@@ -120,5 +128,5 @@ wss.on("connection", (ws) => {
   });
 });
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`Open http://localhost:${PORT}`));
