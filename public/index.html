@@ -1,123 +1,203 @@
-// server.js
-// Node + WebSocket signaling server + static file hosting
-// Put this in your project root (same level as package.json)
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Hand Fight Online</title>
 
-import http from "http";
-import fs from "fs";
-import path from "path";
-import url from "url";
-import { WebSocketServer } from "ws";
-
-const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const PUBLIC_DIR = path.join(__dirname, "public");
-
-function serveFile(req, res) {
-  const reqPath = req.url.split("?")[0];
-  const safePath = reqPath === "/" ? "/index.html" : reqPath;
-
-  const filePath = path.join(PUBLIC_DIR, safePath);
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403);
-    res.end("Forbidden");
-    return;
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #0b0f14;
+    color: #e6e6e6;
+    font-family: system-ui, Arial;
   }
 
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(404);
-      res.end("Not found");
-      return;
-    }
-    const ext = path.extname(filePath).toLowerCase();
-    const mime =
-      ext === ".html" ? "text/html" :
-      ext === ".js" ? "text/javascript" :
-      ext === ".css" ? "text/css" :
-      "application/octet-stream";
-    res.writeHead(200, { "Content-Type": mime });
-    res.end(data);
-  });
-}
+  #wrap {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    height: 100%;
+  }
 
-const server = http.createServer(serveFile);
-const wss = new WebSocketServer({ server });
+  #left {
+    padding: 14px;
+    border-right: 1px solid rgba(255,255,255,0.12);
+  }
 
-// roomId -> { clients: Map(clientId -> ws), hostId: string|null }
-const rooms = new Map();
+  #right {
+    position: relative;
+  }
 
-function roomGet(roomId) {
-  if (!rooms.has(roomId)) rooms.set(roomId, { clients: new Map(), hostId: null });
-  return rooms.get(roomId);
-}
-function broadcast(roomId, obj, exceptWs = null) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  const msg = JSON.stringify(obj);
-  for (const ws of room.clients.values()) {
-    if (ws !== exceptWs && ws.readyState === 1) ws.send(msg);
+  video {
+    width: 100%;
+    border-radius: 14px;
+    background: black;
+    transform: scaleX(-1);
+  }
+
+  button {
+    margin-top: 10px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: none;
+    background: #2a5cff;
+    color: white;
+    cursor: pointer;
+  }
+
+  #status {
+    margin-top: 10px;
+    font-size: 12px;
+    opacity: 0.8;
+  }
+
+  .bar {
+    margin-top: 10px;
+    height: 14px;
+    background: #333;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+
+  .fill {
+    height: 100%;
+    background: #4caf50;
+    width: 100%;
+  }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
   }
 }
-function rid() {
-  return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+</script>
+</head>
+
+<body>
+<div id="wrap">
+  <div id="left">
+    <h3>Hand Fight Online</h3>
+
+    <video id="video" autoplay playsinline muted></video>
+
+    <button id="start">Start (Camera + Mic)</button>
+
+    <div class="bar"><div id="hpYou" class="fill"></div></div>
+    <div class="bar"><div id="hpOp" class="fill"></div></div>
+
+    <div id="status">idle</div>
+  </div>
+
+  <div id="right"></div>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+/* ===== UI ===== */
+const video = document.getElementById("video");
+const statusEl = document.getElementById("status");
+const hpYouEl = document.getElementById("hpYou");
+const hpOpEl = document.getElementById("hpOp");
+
+/* ===== THREE ===== */
+const container = document.getElementById("right");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f14);
+
+const cam = new THREE.PerspectiveCamera(60, container.clientWidth/container.clientHeight, 0.01, 10);
+cam.position.set(0, 0.2, 1);
+
+const controls = new OrbitControls(cam, renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+
+/* ===== HAND DOTS ===== */
+const dots = [];
+const geo = new THREE.SphereGeometry(0.012, 12, 12);
+const mat = new THREE.MeshStandardMaterial({ color: 0x4aa3ff });
+
+for (let i = 0; i < 21; i++) {
+  const m = new THREE.Mesh(geo, mat);
+  scene.add(m);
+  dots.push(m);
 }
 
-wss.on("connection", (ws) => {
-  ws.roomId = null;
-  ws.clientId = null;
+function mpToWorld(lm) {
+  return new THREE.Vector3(
+    (lm.x - 0.5) * 0.9,
+    (0.5 - lm.y) * 0.9,
+    lm.z * 0.9
+  );
+}
 
-  ws.on("message", (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw.toString()); } catch { return; }
+/* ===== MEDIAPIPE ===== */
+let handLandmarker;
+let lastTime = -1;
 
-    if (msg.type === "join") {
-      const roomId = String(msg.roomId || "room1");
-      const clientId = String(msg.clientId || rid());
+async function initHands() {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
 
-      ws.roomId = roomId;
-      ws.clientId = clientId;
-
-      const room = roomGet(roomId);
-      room.clients.set(clientId, ws);
-
-      if (!room.hostId) room.hostId = clientId;
-
-      ws.send(JSON.stringify({
-        type: "joined",
-        roomId,
-        clientId,
-        isHost: room.hostId === clientId,
-        peerCount: room.clients.size
-      }));
-
-      broadcast(roomId, { type: "room", peerCount: room.clients.size, hostId: room.hostId });
-      return;
-    }
-
-    if (ws.roomId) broadcast(ws.roomId, msg, ws);
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+    },
+    runningMode: "VIDEO",
+    numHands: 1
   });
+}
 
-  ws.on("close", () => {
-    const { roomId, clientId } = ws;
-    if (!roomId || !clientId) return;
-
-    const room = rooms.get(roomId);
-    if (!room) return;
-
-    room.clients.delete(clientId);
-
-    if (room.hostId === clientId) {
-      const next = room.clients.keys().next();
-      room.hostId = next.done ? null : next.value;
-    }
-
-    if (room.clients.size === 0) {
-      rooms.delete(roomId);
-      return;
-    }
-
-    broadcast(roomId, { type: "room", peerCount: room.clients.size, hostId: room.hostId });
+/* ===== START ===== */
+document.getElementById("start").onclick = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
   });
+  video.srcObject = stream;
+  await video.play();
+
+  await initHands();
+  statusEl.textContent = "tracking…";
+  loop();
+};
+
+function loop() {
+  if (video.currentTime !== lastTime) {
+    lastTime = video.currentTime;
+    const res = handLandmarker.detectForVideo(video, performance.now());
+    const hand = res.landmarks?.[0];
+
+    if (hand) {
+      for (let i = 0; i < 21; i++) {
+        dots[i].visible = true;
+        dots[i].position.copy(mpToWorld(hand[i]));
+      }
+    } else {
+      dots.forEach(d => d.visible = false);
+    }
+  }
+
+  renderer.render(scene, cam);
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener("resize", () => {
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  cam.aspect = container.clientWidth / container.clientHeight;
+  cam.updateProjectionMatrix();
 });
-
-const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => console.log(`Open http://localhost:${PORT}`));
+</script>
+</body>
+</html>
