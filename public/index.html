@@ -3,13 +3,12 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Hand Fight Online</title>
+<title>VR Hand Fight</title>
 
 <style>
   :root{
     --bg:#0b0f14;
     --panel:#0f1622;
-    --panel2:#0e1a2b;
     --text:#e8edf6;
     --muted:rgba(232,237,246,.7);
     --line:rgba(255,255,255,.10);
@@ -20,10 +19,10 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Arial}
-  #wrap{display:grid;grid-template-columns:360px 1fr;height:100%}
-  #left{padding:14px;border-right:1px solid var(--line);background:linear-gradient(180deg,var(--panel),rgba(15,22,34,.6))}
+  #wrap{display:grid;grid-template-columns:380px 1fr;height:100%}
+  #left{padding:14px;border-right:1px solid var(--line);background:linear-gradient(180deg,var(--panel),rgba(15,22,34,.65))}
   #right{position:relative}
-  h1{font-size:16px;margin:0 0 10px;font-weight:700;letter-spacing:.2px}
+  h1{font-size:16px;margin:0 0 10px;font-weight:800;letter-spacing:.2px}
   .card{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:16px;padding:12px}
   .stack{display:flex;flex-direction:column;gap:10px}
   video{width:100%;border-radius:14px;background:#000;transform:scaleX(-1)}
@@ -52,6 +51,12 @@
   input[type="range"]{width:100%}
   .small{font-size:12px;color:var(--muted)}
   .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;background:rgba(255,255,255,.08);border:1px solid var(--line);padding:2px 6px;border-radius:8px}
+
+  .barWrap{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+  .barTop{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+  .bar{height:12px;border-radius:999px;background:rgba(255,255,255,.10);overflow:hidden;border:1px solid var(--line)}
+  .fill{height:100%;width:100%;background:rgba(61,220,132,.9)}
+  .fill.bad{background:rgba(255,90,115,.9)}
 </style>
 
 <script type="importmap">
@@ -68,21 +73,32 @@
 <div id="wrap">
   <div id="left">
     <div class="stack">
-      <h1>Hand Fight Online</h1>
+      <h1>VR Hand Fight</h1>
 
       <div class="card stack">
         <video id="video" autoplay playsinline muted></video>
         <audio id="remoteAudio" autoplay></audio>
 
         <div class="row">
-          <button id="start" class="primary">Start (camera + mic)</button>
+          <button id="start" class="primary">Start (cam + mic)</button>
           <button id="stop" disabled>Stop</button>
           <button id="mute" disabled>Mute mic</button>
+          <button id="reset" disabled>Reset round</button>
         </div>
 
         <div class="row">
           <span class="pill"><span id="sigDot" class="dot"></span><span id="sigText">Signaling: off</span></span>
           <span class="pill"><span id="p2pDot" class="dot"></span><span id="p2pText">P2P: off</span></span>
+        </div>
+
+        <div class="barWrap">
+          <div class="barTop"><span>You</span><span id="hpYouText">100</span></div>
+          <div class="bar"><div id="hpYou" class="fill"></div></div>
+        </div>
+
+        <div class="barWrap">
+          <div class="barTop"><span>Opponent</span><span id="hpOpText">100</span></div>
+          <div class="bar"><div id="hpOp" class="fill"></div></div>
         </div>
 
         <div class="status" id="status">idle</div>
@@ -93,32 +109,38 @@
         <input id="room" type="text" spellcheck="false" />
         <div class="row">
           <button id="copy">Copy link</button>
-          <span class="small">Tip: open same link on 2 devices</span>
+          <span class="small">Open same link on 2 devices</span>
         </div>
         <div class="small">URL: <span class="kbd" id="share"></span></div>
       </div>
 
       <div class="card stack">
-        <div class="row">
-          <label class="pill" style="cursor:pointer;">
-            <input id="faceEachOther" type="checkbox" checked style="margin:0 8px 0 0;" />
-            Face each other
-          </label>
-        </div>
-
-        <div class="label">More dots</div>
+        <div class="label">Dots per bone (hands)</div>
         <div class="sliderRow">
           <input id="dots" type="range" min="0" max="10" step="1" value="6" />
           <span class="pill"><span id="dotsVal">6</span></span>
         </div>
 
+        <div class="label">Punch sensitivity</div>
+        <div class="sliderRow">
+          <input id="punch" type="range" min="0.8" max="4.0" step="0.1" value="1.7" />
+          <span class="pill"><span id="punchVal">1.7</span></span>
+        </div>
+
+        <div class="label">Hit radius</div>
+        <div class="sliderRow">
+          <input id="radius" type="range" min="0.07" max="0.22" step="0.01" value="0.12" />
+          <span class="pill"><span id="radiusVal">0.12</span></span>
+        </div>
+
         <div class="small">
-          If it lags, lower dots. 6 is a good default.
+          Punch = closed fist + fast movement + fist near opponent head.
+          Use headphones for voice chat.
         </div>
       </div>
 
       <div class="small">
-        Note: <span class="kbd">/favicon.ico</span> 404 is harmless.
+        If you see <span class="kbd">texImage2D: no video</span>, it means tracking ran before frames. This build prevents that.
       </div>
     </div>
   </div>
@@ -127,545 +149,822 @@
 </div>
 
 <script type="module">
-  import * as THREE from "three";
-  import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-  import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { FilesetResolver, HandLandmarker, FaceLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
-  // ===== UI =====
-  const video = document.getElementById("video");
-  const remoteAudio = document.getElementById("remoteAudio");
+/* ---------------- UI ---------------- */
+const video = document.getElementById("video");
+const remoteAudio = document.getElementById("remoteAudio");
 
-  const startBtn = document.getElementById("start");
-  const stopBtn  = document.getElementById("stop");
-  const muteBtn  = document.getElementById("mute");
+const startBtn = document.getElementById("start");
+const stopBtn  = document.getElementById("stop");
+const muteBtn  = document.getElementById("mute");
+const resetBtn = document.getElementById("reset");
 
-  const statusEl = document.getElementById("status");
-  const roomInput = document.getElementById("room");
-  const shareEl = document.getElementById("share");
-  const copyBtn = document.getElementById("copy");
+const statusEl = document.getElementById("status");
+const roomInput = document.getElementById("room");
+const shareEl = document.getElementById("share");
+const copyBtn = document.getElementById("copy");
 
-  const sigDot = document.getElementById("sigDot");
-  const sigText = document.getElementById("sigText");
-  const p2pDot = document.getElementById("p2pDot");
-  const p2pText = document.getElementById("p2pText");
+const sigDot = document.getElementById("sigDot");
+const sigText = document.getElementById("sigText");
+const p2pDot = document.getElementById("p2pDot");
+const p2pText = document.getElementById("p2pText");
 
-  const dotsRange = document.getElementById("dots");
-  const dotsVal = document.getElementById("dotsVal");
-  const faceEachOtherChk = document.getElementById("faceEachOther");
+const dotsRange = document.getElementById("dots");
+const dotsVal = document.getElementById("dotsVal");
+const punchRange = document.getElementById("punch");
+const punchVal = document.getElementById("punchVal");
+const radiusRange = document.getElementById("radius");
+const radiusVal = document.getElementById("radiusVal");
 
-  function setStatus(s){ statusEl.textContent = s; }
-  function setSig(ok, text){
-    sigDot.classList.toggle("ok", ok);
-    sigDot.classList.toggle("bad", !ok && text.includes("error"));
-    sigText.textContent = `Signaling: ${text}`;
+const hpYouFill = document.getElementById("hpYou");
+const hpOpFill  = document.getElementById("hpOp");
+const hpYouText = document.getElementById("hpYouText");
+const hpOpText  = document.getElementById("hpOpText");
+
+function setStatus(s){ statusEl.textContent = s; }
+function setSig(ok, text){
+  sigDot.classList.toggle("ok", ok);
+  sigDot.classList.toggle("bad", !ok && text.includes("error"));
+  sigText.textContent = `Signaling: ${text}`;
+}
+function setP2P(ok, text){
+  p2pDot.classList.toggle("ok", ok);
+  p2pDot.classList.toggle("bad", !ok && (text.includes("failed") || text.includes("closed")));
+  p2pText.textContent = `P2P: ${text}`;
+}
+
+function clamp(n,a,b){ return Math.max(a, Math.min(b,n)); }
+
+let hpYou = 100;
+let hpOp = 100;
+function renderHP(){
+  hpYou = clamp(hpYou,0,100);
+  hpOp  = clamp(hpOp,0,100);
+  hpYouFill.style.width = `${hpYou}%`;
+  hpOpFill.style.width  = `${hpOp}%`;
+  hpYouText.textContent = String(hpYou);
+  hpOpText.textContent  = String(hpOp);
+  hpYouFill.classList.toggle("bad", hpYou <= 30);
+  hpOpFill.classList.toggle("bad", hpOp <= 30);
+}
+renderHP();
+
+/* ---------------- Room ---------------- */
+const urlRoom = new URLSearchParams(location.search).get("room") || "test";
+roomInput.value = urlRoom;
+
+function updateShare(){
+  const room = roomInput.value.trim() || "test";
+  const u = new URL(location.href);
+  u.searchParams.set("room", room);
+  history.replaceState({}, "", u.toString());
+  shareEl.textContent = u.toString();
+}
+roomInput.addEventListener("input", updateShare);
+updateShare();
+
+copyBtn.onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(shareEl.textContent);
+    copyBtn.textContent = "Copied!";
+    setTimeout(() => copyBtn.textContent = "Copy link", 900);
+  } catch {
+    copyBtn.textContent = "Copy failed";
+    setTimeout(() => copyBtn.textContent = "Copy link", 900);
   }
-  function setP2P(ok, text){
-    p2pDot.classList.toggle("ok", ok);
-    p2pDot.classList.toggle("bad", !ok && text.includes("failed"));
-    p2pText.textContent = `P2P: ${text}`;
-  }
+};
 
+function updateSliders(){
   dotsVal.textContent = dotsRange.value;
-  dotsRange.addEventListener("input", () => dotsVal.textContent = dotsRange.value);
+  punchVal.textContent = Number(punchRange.value).toFixed(1);
+  radiusVal.textContent = Number(radiusRange.value).toFixed(2);
+}
+dotsRange.addEventListener("input", updateSliders);
+punchRange.addEventListener("input", updateSliders);
+radiusRange.addEventListener("input", updateSliders);
+updateSliders();
 
-  // Room from URL
-  const urlRoom = new URLSearchParams(location.search).get("room") || "test";
-  roomInput.value = urlRoom;
+/* ---------------- Three.js World ---------------- */
+const container = document.getElementById("right");
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(devicePixelRatio);
+container.appendChild(renderer.domElement);
 
-  function updateShare(){
-    const room = roomInput.value.trim() || "test";
-    const u = new URL(location.href);
-    u.searchParams.set("room", room);
-    history.replaceState({}, "", u.toString());
-    shareEl.textContent = u.toString();
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f14);
+
+const camera3D = new THREE.PerspectiveCamera(60, 1, 0.01, 50);
+camera3D.position.set(0, 0.25, 1.25);
+
+const controls = new OrbitControls(camera3D, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 0.18, 0);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+const grid = new THREE.GridHelper(3, 30, 0xffffff, 0xffffff);
+grid.material.opacity = 0.08;
+grid.material.transparent = true;
+scene.add(grid);
+
+function resize(){
+  const w = container.clientWidth || 1;
+  const h = container.clientHeight || 1;
+  renderer.setSize(w, h);
+  camera3D.aspect = w/h;
+  camera3D.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+resize();
+
+// "VR standing positions"
+const YOU_Z = 0.28;
+const OP_Z  = -0.28;
+
+// Head spheres (hit targets)
+const headGeo = new THREE.SphereGeometry(0.10, 24, 24);
+const headYou = new THREE.Mesh(headGeo, new THREE.MeshStandardMaterial({ color: 0x4aa3ff, transparent:true, opacity:0.22 }));
+const headOp  = new THREE.Mesh(headGeo, new THREE.MeshStandardMaterial({ color: 0xff4aa3, transparent:true, opacity:0.22 }));
+scene.add(headYou);
+scene.add(headOp);
+
+// Face dots
+function makeFaceDots(colorHex){
+  const maxDots = 10; // lightweight keypoints
+  const geom = new THREE.BufferGeometry();
+  const positions = new Float32Array(maxDots * 3);
+  geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geom.setDrawRange(0, 0);
+  const mat = new THREE.PointsMaterial({ size: 0.015, color: colorHex });
+  const pts = new THREE.Points(geom, mat);
+  scene.add(pts);
+  return { pts, geom, positions, maxDots };
+}
+const faceLocal = makeFaceDots(0x9ad0ff);
+const faceRemote = makeFaceDots(0xffb0d3);
+
+// Hand dot clouds (more dots)
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17]
+];
+
+function mpToWorld(lm){
+  return new THREE.Vector3(
+    (lm.x - 0.5) * 0.9,
+    (0.5 - lm.y) * 0.9,
+    (lm.z) * 0.9
+  );
+}
+
+// remote mirrored so you face each other
+function mpToWorldRemote(lm){
+  const p = mpToWorld(lm);
+  p.x = -p.x;
+  return p;
+}
+
+function makeDotCloud(maxDots, colorHex){
+  const geom = new THREE.BufferGeometry();
+  const positions = new Float32Array(maxDots * 3);
+  geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geom.setDrawRange(0, 0);
+  const mat = new THREE.PointsMaterial({ size: 0.012, color: colorHex });
+  const points = new THREE.Points(geom, mat);
+  scene.add(points);
+  return { points, geom, positions, maxDots };
+}
+
+function maxHandDots(dpb){
+  return 21 + HAND_CONNECTIONS.length * dpb;
+}
+
+let DOTS_PER_BONE = Number(dotsRange.value);
+let localHand1 = makeDotCloud(maxHandDots(DOTS_PER_BONE), 0x4aa3ff);
+let localHand2 = makeDotCloud(maxHandDots(DOTS_PER_BONE), 0x4aa3ff);
+let remoteHand1 = makeDotCloud(maxHandDots(DOTS_PER_BONE), 0xff4aa3);
+let remoteHand2 = makeDotCloud(maxHandDots(DOTS_PER_BONE), 0xffa34a);
+
+function rebuildHandClouds(){
+  const next = Number(dotsRange.value);
+  if (next === DOTS_PER_BONE) return;
+  DOTS_PER_BONE = next;
+
+  scene.remove(localHand1.points); scene.remove(localHand2.points);
+  scene.remove(remoteHand1.points); scene.remove(remoteHand2.points);
+
+  localHand1 = makeDotCloud(maxHandDots(DOTS_PER_BONE), 0x4aa3ff);
+  localHand2 = makeDotCloud(maxHandDots(DOTS_PER_BONE), 0x4aa3ff);
+  remoteHand1 = makeDotCloud(maxHandDots(DOTS_PER_BONE), 0xff4aa3);
+  remoteHand2 = makeDotCloud(maxHandDots(DOTS_PER_BONE), 0xffa34a);
+}
+dotsRange.addEventListener("input", rebuildHandClouds);
+
+function fillHandCloud(hand, cloud, worldFn, zOffset){
+  if (!hand){
+    cloud.geom.setDrawRange(0,0);
+    cloud.geom.attributes.position.needsUpdate = true;
+    return;
   }
-  roomInput.addEventListener("input", updateShare);
-  updateShare();
+  let idx = 0;
 
-  copyBtn.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(shareEl.textContent);
-      copyBtn.textContent = "Copied!";
-      setTimeout(() => copyBtn.textContent = "Copy link", 900);
-    } catch {
-      copyBtn.textContent = "Copy failed";
-      setTimeout(() => copyBtn.textContent = "Copy link", 900);
+  for (let i=0;i<21;i++){
+    const p = worldFn(hand[i]);
+    cloud.positions[idx++] = p.x;
+    cloud.positions[idx++] = p.y;
+    cloud.positions[idx++] = p.z + zOffset;
+  }
+
+  for (const [a,b] of HAND_CONNECTIONS){
+    const pa = worldFn(hand[a]);
+    const pb = worldFn(hand[b]);
+    for (let t=1;t<=DOTS_PER_BONE;t++){
+      const k = t/(DOTS_PER_BONE+1);
+      cloud.positions[idx++] = pa.x + (pb.x-pa.x)*k;
+      cloud.positions[idx++] = pa.y + (pb.y-pa.y)*k;
+      cloud.positions[idx++] = (pa.z + (pb.z-pa.z)*k) + zOffset;
+    }
+  }
+
+  cloud.geom.setDrawRange(0, idx/3);
+  cloud.geom.attributes.position.needsUpdate = true;
+}
+
+function fillFaceDots(points10, faceObj, worldFn, zOffset){
+  if (!points10){
+    faceObj.geom.setDrawRange(0,0);
+    faceObj.geom.attributes.position.needsUpdate = true;
+    return;
+  }
+  let idx = 0;
+  for (let i=0;i<10;i++){
+    const lm = points10[i];
+    const p = worldFn(lm);
+    faceObj.positions[idx++] = p.x;
+    faceObj.positions[idx++] = p.y;
+    faceObj.positions[idx++] = p.z + zOffset;
+  }
+  faceObj.geom.setDrawRange(0, 10);
+  faceObj.geom.attributes.position.needsUpdate = true;
+}
+
+/* ---------------- MediaPipe (Hands + Face) ---------------- */
+let handLandmarker = null;
+let faceLandmarker = null;
+let lastVideoTime = -1;
+
+async function initLandmarkers(){
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+    },
+    runningMode: "VIDEO",
+    numHands: 2
+  });
+
+  faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+    },
+    runningMode: "VIDEO",
+    outputFaceBlendshapes: false,
+    outputFacialTransformationMatrixes: false,
+    numFaces: 1
+  });
+}
+
+function videoReady(){
+  return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+}
+
+// We only send 10 face points (lightweight)
+const FACE_IDX = [
+  1,   // nose tip-ish
+  33,  // left eye outer
+  263, // right eye outer
+  61,  // mouth left
+  291, // mouth right
+  199, // chin
+  10,  // forehead
+  234, // left cheek
+  454, // right cheek
+  168  // between eyes
+];
+
+function pickFace10(face478){
+  if (!face478) return null;
+  const out = [];
+  for (const idx of FACE_IDX) out.push(face478[idx]);
+  return out;
+}
+
+/* ---------------- Multiplayer (WS signaling + WebRTC audio+data) ---------------- */
+let ws = null;
+let pc = null;
+let dc = null;
+
+let stream = null;
+let running = false;
+let micMuted = false;
+
+const clientId = (crypto?.randomUUID?.() || Math.random().toString(16).slice(2));
+let isHost = false;
+let peerCount = 1;
+let rtcStarted = false;
+
+// Remote state
+let rHand1 = null;
+let rHand2 = null;
+let rFace10 = null;
+
+function wsUrl(){
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}`;
+}
+
+function resetRTC(){
+  rtcStarted = false;
+  try { dc?.close(); } catch {}
+  try { pc?.close(); } catch {}
+  dc = null;
+  pc = null;
+  setP2P(false, "off");
+}
+
+function makePC(){
+  const peer = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  });
+
+  peer.onicecandidate = (e) => {
+    if (e.candidate && ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type:"ice", candidate:e.candidate }));
     }
   };
 
-  // ===== Three.js =====
-  const container = document.getElementById("right");
-  const renderer = new THREE.WebGLRenderer({ antialias:true });
-  renderer.setPixelRatio(devicePixelRatio);
-  container.appendChild(renderer.domElement);
+  peer.ondatachannel = (ev) => {
+    dc = ev.channel;
+    wireDC();
+  };
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b0f14);
+  peer.ontrack = (event) => {
+    const [remoteStream] = event.streams;
+    if (remoteStream) remoteAudio.srcObject = remoteStream;
+  };
 
-  const camera3D = new THREE.PerspectiveCamera(60, 1, 0.01, 30);
-  camera3D.position.set(0, 0.25, 1.15);
+  return peer;
+}
 
-  const controls = new OrbitControls(camera3D, renderer.domElement);
-  controls.enableDamping = true;
-  controls.target.set(0, 0.15, 0);
+function wireDC(){
+  if (!dc) return;
+  dc.binaryType = "arraybuffer";
+  dc.onopen = () => setP2P(true, "connected");
+  dc.onclose = () => setP2P(false, "closed");
+  dc.onerror = () => setP2P(false, "failed");
+  dc.onmessage = (ev) => handlePeerMessage(ev.data);
+}
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-  const grid = new THREE.GridHelper(2, 20, 0xffffff, 0xffffff);
-  grid.material.opacity = 0.10;
-  grid.material.transparent = true;
-  scene.add(grid);
+// Packet format (Float32Array):
+// hands: 126 floats (2 hands * 21 * xyz)
+// face:  30 floats (10 points * xyz)
+// total: 156 floats
+const PACK_FLOATS = 156;
 
-  function resize(){
-    const w = container.clientWidth || 1;
-    const h = container.clientHeight || 1;
-    renderer.setSize(w, h);
-    camera3D.aspect = w / h;
-    camera3D.updateProjectionMatrix();
-  }
-  window.addEventListener("resize", resize);
-  resize();
+function packPose(h1, h2, face10){
+  const out = new Float32Array(PACK_FLOATS);
 
-  // ===== Hand dot clouds with interpolation =====
-  const CONNECTIONS = [
-    [0,1],[1,2],[2,3],[3,4],
-    [0,5],[5,6],[6,7],[7,8],
-    [0,9],[9,10],[10,11],[11,12],
-    [0,13],[13,14],[14,15],[15,16],
-    [0,17],[17,18],[18,19],[19,20],
-    [5,9],[9,13],[13,17]
-  ];
-
-  function mpToWorld(lm){
-    return new THREE.Vector3(
-      (lm.x - 0.5) * 0.9,
-      (0.5 - lm.y) * 0.9,
-      (lm.z) * 0.9
-    );
-  }
-  function mpToWorldRemote(lm){
-    const p = mpToWorld(lm);
-    if (faceEachOtherChk.checked) p.x = -p.x;
-    return p;
+  function writeHand(hand, offset){
+    if (!hand) return;
+    for (let i=0;i<21;i++){
+      out[offset + i*3 + 0] = hand[i].x;
+      out[offset + i*3 + 1] = hand[i].y;
+      out[offset + i*3 + 2] = hand[i].z;
+    }
   }
 
-  function makeDotCloud(maxDots, colorHex){
-    const geom = new THREE.BufferGeometry();
-    const positions = new Float32Array(maxDots * 3);
-    geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geom.setDrawRange(0, 0);
-    const mat = new THREE.PointsMaterial({ size: 0.012, color: colorHex });
-    const points = new THREE.Points(geom, mat);
-    scene.add(points);
-    return { points, geom, positions, maxDots };
+  function writeFace(face, offset){
+    if (!face) return;
+    for (let i=0;i<10;i++){
+      out[offset + i*3 + 0] = face[i].x;
+      out[offset + i*3 + 1] = face[i].y;
+      out[offset + i*3 + 2] = face[i].z;
+    }
   }
 
-  function maxDotsFor(dpb){
-    return 21 + CONNECTIONS.length * dpb;
+  writeHand(h1, 0);
+  writeHand(h2, 63);
+  writeFace(face10, 126);
+
+  return out;
+}
+
+function poseToHand(pose63){
+  let sum = 0;
+  for (let i=0;i<63;i++) sum += Math.abs(pose63[i]);
+  if (sum < 1e-6) return null;
+
+  const out = [];
+  for (let i=0;i<21;i++){
+    out.push({ x: pose63[i*3+0], y: pose63[i*3+1], z: pose63[i*3+2] });
+  }
+  return out;
+}
+
+function poseToFace(pose30){
+  let sum = 0;
+  for (let i=0;i<30;i++) sum += Math.abs(pose30[i]);
+  if (sum < 1e-6) return null;
+
+  const out = [];
+  for (let i=0;i<10;i++){
+    out.push({ x: pose30[i*3+0], y: pose30[i*3+1], z: pose30[i*3+2] });
+  }
+  return out;
+}
+
+function sendBinaryPose(arr){
+  if (!dc || dc.readyState !== "open") return;
+  dc.send(arr.buffer);
+}
+
+function sendEvent(obj){
+  if (!dc || dc.readyState !== "open") return;
+  dc.send(JSON.stringify(obj));
+}
+
+function handlePeerMessage(data){
+  if (typeof data === "string") {
+    let msg;
+    try { msg = JSON.parse(data); } catch { return; }
+
+    if (msg.t === "hit") {
+      hpYou -= Number(msg.dmg || 10);
+      renderHP();
+    }
+    if (msg.t === "reset") resetRoundLocal(false);
+    return;
   }
 
-  let DOTS_PER_BONE = Number(dotsRange.value);
+  const buf = new Float32Array(data);
+  if (buf.length !== PACK_FLOATS) return;
 
-  let local1 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0x4aa3ff);
-  let local2 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0x4aa3ff);
-  let remote1 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0xff4aa3);
-  let remote2 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0xffa34a);
+  rHand1 = poseToHand(buf.subarray(0, 63));
+  rHand2 = poseToHand(buf.subarray(63, 126));
+  rFace10 = poseToFace(buf.subarray(126, 156));
+}
 
-  function rebuildCloudsIfNeeded(){
-    const next = Number(dotsRange.value);
-    if (next === DOTS_PER_BONE) return;
-    DOTS_PER_BONE = next;
+function connectSignaling(){
+  const room = roomInput.value.trim() || "test";
+  resetRTC();
 
-    scene.remove(local1.points); scene.remove(local2.points);
-    scene.remove(remote1.points); scene.remove(remote2.points);
+  ws = new WebSocket(wsUrl());
+  ws.onopen = () => {
+    setSig(true, "connected");
+    ws.send(JSON.stringify({ type:"join", roomId: room, clientId }));
+    maybeStartHostRTC();
+  };
+  ws.onerror = () => setSig(false, "error");
+  ws.onclose = () => setSig(false, "off");
 
-    local1 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0x4aa3ff);
-    local2 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0x4aa3ff);
-    remote1 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0xff4aa3);
-    remote2 = makeDotCloud(maxDotsFor(DOTS_PER_BONE), 0xffa34a);
-  }
-  dotsRange.addEventListener("input", rebuildCloudsIfNeeded);
+  ws.onmessage = async (ev) => {
+    const msg = JSON.parse(ev.data);
 
-  function fillCloud(hand, cloud, worldFn){
-    if (!hand){
-      cloud.geom.setDrawRange(0, 0);
-      cloud.geom.attributes.position.needsUpdate = true;
+    if (msg.type === "joined") {
+      isHost = !!msg.isHost;
+      peerCount = msg.peerCount || 1;
+      maybeStartHostRTC();
       return;
     }
 
-    let idx = 0;
-
-    for (let i=0;i<21;i++){
-      const p = worldFn(hand[i]);
-      cloud.positions[idx++] = p.x;
-      cloud.positions[idx++] = p.y;
-      cloud.positions[idx++] = p.z;
-    }
-
-    for (const [a,b] of CONNECTIONS){
-      const pa = worldFn(hand[a]);
-      const pb = worldFn(hand[b]);
-      for (let t=1;t<=DOTS_PER_BONE;t++){
-        const k = t/(DOTS_PER_BONE+1);
-        cloud.positions[idx++] = pa.x + (pb.x-pa.x)*k;
-        cloud.positions[idx++] = pa.y + (pb.y-pa.y)*k;
-        cloud.positions[idx++] = pa.z + (pb.z-pa.z)*k;
-      }
-    }
-
-    cloud.geom.setDrawRange(0, idx/3);
-    cloud.geom.attributes.position.needsUpdate = true;
-  }
-
-  // ===== MediaPipe Tasks Vision =====
-  let handLandmarker = null;
-  let lastVideoTime = -1;
-
-  async function initHandLandmarker(){
-    const vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-    );
-
-    handLandmarker = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-      },
-      runningMode: "VIDEO",
-      numHands: 2
-    });
-  }
-
-  function videoReady(){
-    return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
-  }
-
-  // ===== Multiplayer: signaling + WebRTC (audio + data) =====
-  let ws = null;
-  let pc = null;
-  let dc = null;
-
-  let stream = null;
-  let running = false;
-
-  const clientId = (crypto?.randomUUID?.() || Math.random().toString(16).slice(2));
-  let isHost = false;
-  let peerCount = 1;
-  let rtcStarted = false;
-
-  let remoteHand1 = null;
-  let remoteHand2 = null;
-
-  function wsUrl(){
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${location.host}`;
-  }
-
-  function resetRTC(){
-    rtcStarted = false;
-    try { dc?.close(); } catch {}
-    try { pc?.close(); } catch {}
-    dc = null;
-    pc = null;
-    setP2P(false, "off");
-  }
-
-  function makePC(){
-    const peer = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    });
-
-    peer.onicecandidate = (e) => {
-      if (e.candidate && ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type:"ice", candidate:e.candidate }));
-      }
-    };
-
-    peer.ondatachannel = (ev) => {
-      dc = ev.channel;
-      wireDC();
-    };
-
-    peer.ontrack = (event) => {
-      const [remoteStream] = event.streams;
-      if (remoteStream) remoteAudio.srcObject = remoteStream;
-    };
-
-    return peer;
-  }
-
-  function wireDC(){
-    if (!dc) return;
-    dc.binaryType = "arraybuffer";
-
-    dc.onopen = () => setP2P(true, "connected");
-    dc.onclose = () => setP2P(false, "closed");
-    dc.onerror = () => setP2P(false, "failed");
-
-    dc.onmessage = (ev) => {
-      const buf = new Float32Array(ev.data);
-      remoteHand1 = poseToLandmarks(buf.subarray(0, 63));
-      remoteHand2 = poseToLandmarks(buf.subarray(63, 126));
-    };
-  }
-
-  function poseToLandmarks(pose63){
-    let sum = 0;
-    for (let i=0;i<63;i++) sum += Math.abs(pose63[i]);
-    if (sum < 1e-6) return null;
-
-    const out = [];
-    for (let i=0;i<21;i++){
-      out.push({
-        x: pose63[i*3+0],
-        y: pose63[i*3+1],
-        z: pose63[i*3+2]
-      });
-    }
-    return out;
-  }
-
-  function packAndSend(h1, h2){
-    if (!dc || dc.readyState !== "open") return;
-
-    const out = new Float32Array(126);
-
-    function writeHand(hand, offset){
-      if (!hand) return;
-      for (let i=0;i<21;i++){
-        out[offset + i*3 + 0] = hand[i].x;
-        out[offset + i*3 + 1] = hand[i].y;
-        out[offset + i*3 + 2] = hand[i].z;
-      }
-    }
-
-    writeHand(h1, 0);
-    writeHand(h2, 63);
-
-    dc.send(out.buffer);
-  }
-
-  function connectSignaling(){
-    const room = roomInput.value.trim() || "test";
-    resetRTC();
-
-    ws = new WebSocket(wsUrl());
-    ws.onopen = () => {
-      setSig(true, "connected");
-      ws.send(JSON.stringify({ type:"join", roomId: room, clientId }));
+    if (msg.type === "room") {
+      peerCount = msg.peerCount || peerCount;
+      isHost = (msg.hostId || null) === clientId;
       maybeStartHostRTC();
-    };
-    ws.onerror = () => setSig(false, "error");
-    ws.onclose = () => setSig(false, "off");
-
-    ws.onmessage = async (ev) => {
-      const msg = JSON.parse(ev.data);
-
-      if (msg.type === "joined") {
-        isHost = !!msg.isHost;
-        peerCount = msg.peerCount || 1;
-        maybeStartHostRTC();
-        return;
-      }
-
-      if (msg.type === "room") {
-        peerCount = msg.peerCount || peerCount;
-        isHost = (msg.hostId || null) === clientId;
-        maybeStartHostRTC();
-        return;
-      }
-
-      if (msg.type === "offer") await handleOffer(msg.offer);
-      if (msg.type === "answer") await handleAnswer(msg.answer);
-      if (msg.type === "ice") await handleICE(msg.candidate);
-    };
-  }
-
-  function maybeStartHostRTC(){
-    if (!isHost) return;
-    if (peerCount < 2) return;
-    if (!stream) return;
-    if (rtcStarted) return;
-    hostStartRTC().catch(() => setP2P(false, "failed"));
-  }
-
-  async function hostStartRTC(){
-    rtcStarted = true;
-    resetRTC();
-    pc = makePC();
-
-    // Add mic tracks
-    for (const track of stream.getAudioTracks()) {
-      pc.addTrack(track, stream);
+      return;
     }
 
-    dc = pc.createDataChannel("hands");
-    wireDC();
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    ws.send(JSON.stringify({ type:"offer", offer }));
-    setP2P(false, "connecting…");
-  }
-
-  async function handleOffer(offer){
-    resetRTC();
-    pc = makePC();
-
-    for (const track of stream.getAudioTracks()) {
-      pc.addTrack(track, stream);
-    }
-
-    await pc.setRemoteDescription(offer);
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    ws.send(JSON.stringify({ type:"answer", answer }));
-    setP2P(false, "connecting…");
-  }
-
-  async function handleAnswer(answer){
-    if (!pc) return;
-    await pc.setRemoteDescription(answer);
-  }
-
-  async function handleICE(candidate){
-    if (!pc) return;
-    try { await pc.addIceCandidate(candidate); } catch {}
-  }
-
-  // ===== Start / Stop / Mute =====
-  let micMuted = false;
-
-  muteBtn.onclick = () => {
-    if (!stream) return;
-    micMuted = !micMuted;
-    for (const t of stream.getAudioTracks()) t.enabled = !micMuted;
-    muteBtn.textContent = micMuted ? "Unmute mic" : "Mute mic";
+    if (msg.type === "offer") await handleOffer(msg.offer);
+    if (msg.type === "answer") await handleAnswer(msg.answer);
+    if (msg.type === "ice") await handleICE(msg.candidate);
   };
+}
 
-  startBtn.onclick = async () => {
-    try {
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
-      muteBtn.disabled = false;
+function maybeStartHostRTC(){
+  if (!isHost) return;
+  if (peerCount < 2) return;
+  if (!stream) return;
+  if (rtcStarted) return;
+  hostStartRTC().catch(() => setP2P(false, "failed"));
+}
 
-      setStatus("Requesting camera + mic…");
+async function hostStartRTC(){
+  rtcStarted = true;
+  resetRTC();
+  pc = makePC();
 
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
+  for (const track of stream.getAudioTracks()){
+    pc.addTrack(track, stream);
+  }
 
-      video.srcObject = stream;
+  dc = pc.createDataChannel("game");
+  wireDC();
 
-      // Wait for metadata, then wait until frames exist
-      await new Promise((resolve) => {
-        if (video.readyState >= 1) return resolve();
-        video.onloadedmetadata = () => resolve();
-      });
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({ type:"offer", offer }));
+  setP2P(false, "connecting…");
+}
 
-      await video.play();
+async function handleOffer(offer){
+  resetRTC();
+  pc = makePC();
 
-      setStatus("Loading hand tracker…");
-      if (!handLandmarker) await initHandLandmarker();
+  for (const track of stream.getAudioTracks()){
+    pc.addTrack(track, stream);
+  }
 
-      connectSignaling();
+  await pc.setRemoteDescription(offer);
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  ws.send(JSON.stringify({ type:"answer", answer }));
+  setP2P(false, "connecting…");
+}
 
-      running = true;
-      lastVideoTime = -1;
-      setP2P(false, "connecting…");
-      setStatus("Running. Show your hands.");
-      requestAnimationFrame(loop);
-    } catch (e) {
-      console.error(e);
-      setStatus(`Error: ${e.name}\n${e.message}`);
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      muteBtn.disabled = true;
-    }
-  };
+async function handleAnswer(answer){
+  if (!pc) return;
+  await pc.setRemoteDescription(answer);
+}
 
-  stopBtn.onclick = () => {
-    running = false;
+async function handleICE(candidate){
+  if (!pc) return;
+  try { await pc.addIceCandidate(candidate); } catch {}
+}
 
-    fillCloud(null, local1, mpToWorld);
-    fillCloud(null, local2, mpToWorld);
-    fillCloud(null, remote1, mpToWorldRemote);
-    fillCloud(null, remote2, mpToWorldRemote);
+/* ---------------- Fighting Logic ---------------- */
+// fist approximation based on fingertip distances to palm
+function dist(a,b){
+  const dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z;
+  return Math.sqrt(dx*dx+dy*dy+dz*dz);
+}
 
-    try { ws?.close(); } catch {}
-    ws = null;
-    resetRTC();
+function isFist(hand){
+  if (!hand) return false;
+  const wrist = hand[0];
+  const palm = hand[9];
+  const tips = [4,8,12,16,20].map(i => hand[i]);
 
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop());
-      stream = null;
-    }
-    video.srcObject = null;
+  let s=0;
+  for (const t of tips) s += dist(t,palm);
+  const avg = s / tips.length;
 
-    remoteAudio.srcObject = null;
-    remoteHand1 = null;
-    remoteHand2 = null;
+  const scale = Math.max(0.0001, dist(wrist,palm));
+  const ratio = avg/scale;
 
+  return ratio < 1.75; // smaller = more closed
+}
+
+// Use landmark 9 (middle MCP) as fist core
+function fistCoreWorld(hand, worldFn, zOffset){
+  if (!hand) return null;
+  const p = worldFn(hand[9]);
+  p.z += zOffset;
+  return p;
+}
+
+let prevCore1 = null;
+let prevCore2 = null;
+let prevTimeMs = 0;
+let lastHitMs = 0;
+
+function tryPunch(hand, prevCore, nowMs){
+  if (!hand) return prevCore;
+
+  const core = fistCoreWorld(hand, mpToWorld, YOU_Z);
+  if (!core) return prevCore;
+
+  const dt = Math.max(1, nowMs - prevTimeMs) / 1000;
+
+  const fist = isFist(hand);
+  if (!prevCore) return core.clone();
+
+  const speed = core.clone().sub(prevCore).length() / dt;
+
+  // only count a punch if fist is closed and moving fast
+  const punchThresh = Number(punchRange.value);
+  if (!fist || speed < punchThresh) return core.clone();
+
+  // cooldown so it doesn't machine-gun
+  if (nowMs - lastHitMs < 280) return core.clone();
+
+  // opponent head target position derived from remote face if available, else use headOp sphere
+  const target = headOp.position.clone();
+  const hitRadius = Number(radiusRange.value);
+
+  if (core.distanceTo(target) <= (headGeo.parameters.radius + hitRadius)) {
+    lastHitMs = nowMs;
+    hpOp -= 10;
+    renderHP();
+    sendEvent({ t:"hit", dmg:10 });
+
+    headOp.material.opacity = 0.42;
+    setTimeout(() => headOp.material.opacity = 0.22, 120);
+
+    if (hpOp <= 0) setStatus("KO! You win. Press Reset round.");
+  }
+
+  return core.clone();
+}
+
+function resetRoundLocal(sendToPeer){
+  hpYou = 100;
+  hpOp = 100;
+  renderHP();
+  lastHitMs = 0;
+  prevCore1 = null;
+  prevCore2 = null;
+  if (sendToPeer) sendEvent({ t:"reset" });
+  setStatus("Round reset.");
+}
+
+/* ---------------- Start/Stop/Mute/Reset ---------------- */
+muteBtn.onclick = () => {
+  if (!stream) return;
+  micMuted = !micMuted;
+  for (const t of stream.getAudioTracks()) t.enabled = !micMuted;
+  muteBtn.textContent = micMuted ? "Unmute mic" : "Mute mic";
+};
+
+resetBtn.onclick = () => resetRoundLocal(true);
+
+startBtn.onclick = async () => {
+  try {
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    muteBtn.disabled = false;
+    resetBtn.disabled = false;
+
+    setStatus("Requesting camera + mic…");
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user" },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
+    video.srcObject = stream;
+
+    await new Promise((resolve) => {
+      if (video.readyState >= 1) return resolve();
+      video.onloadedmetadata = () => resolve();
+    });
+
+    await video.play();
+
+    setStatus("Loading trackers (hands + face)…");
+    if (!handLandmarker || !faceLandmarker) await initLandmarkers();
+
+    connectSignaling();
+    running = true;
+    lastVideoTime = -1;
+    prevTimeMs = performance.now();
+    prevCore1 = null;
+    prevCore2 = null;
+
+    setP2P(false, "connecting…");
+    setStatus("Ready. Face your opponent, make a fist, punch toward their head.");
+    requestAnimationFrame(loop);
+  } catch (e) {
+    console.error(e);
+    setStatus(`Error: ${e.name}\n${e.message}`);
     startBtn.disabled = false;
     stopBtn.disabled = true;
     muteBtn.disabled = true;
-    muteBtn.textContent = "Mute mic";
-    micMuted = false;
-
-    setSig(false, "off");
-    setP2P(false, "off");
-    setStatus("stopped");
-  };
-
-  // ===== Main loop =====
-  function loop(){
-    if (!running) return;
-
-    // Fix for your error: only detect when video has frames
-    if (videoReady() && video.currentTime !== lastVideoTime) {
-      lastVideoTime = video.currentTime;
-
-      const nowMs = performance.now();
-      const result = handLandmarker.detectForVideo(video, nowMs);
-      const hands = result?.landmarks || [];
-
-      const h1 = hands[0] || null;
-      const h2 = hands[1] || null;
-
-      fillCloud(h1, local1, mpToWorld);
-      fillCloud(h2, local2, mpToWorld);
-
-      packAndSend(h1, h2);
-
-      fillCloud(remoteHand1, remote1, mpToWorldRemote);
-      fillCloud(remoteHand2, remote2, mpToWorldRemote);
-
-      setStatus(
-        `local hands: ${hands.length}\n` +
-        `room: ${(roomInput.value.trim()||"test")}\n` +
-        `peers: ${peerCount}`
-      );
-    }
-
-    controls.update();
-    renderer.render(scene, camera3D);
-    requestAnimationFrame(loop);
+    resetBtn.disabled = true;
   }
+};
 
-  // Render loop resize safety
-  window.addEventListener("resize", resize);
-  function animate(){
-    requestAnimationFrame(animate);
-    // (render is already happening in loop; keep this light)
+stopBtn.onclick = () => {
+  running = false;
+
+  fillHandCloud(null, localHand1, mpToWorld, YOU_Z);
+  fillHandCloud(null, localHand2, mpToWorld, YOU_Z);
+  fillHandCloud(null, remoteHand1, mpToWorldRemote, OP_Z);
+  fillHandCloud(null, remoteHand2, mpToWorldRemote, OP_Z);
+  fillFaceDots(null, faceLocal, mpToWorld, YOU_Z);
+  fillFaceDots(null, faceRemote, mpToWorldRemote, OP_Z);
+
+  try { ws?.close(); } catch {}
+  ws = null;
+  resetRTC();
+
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
   }
-  animate();
+  video.srcObject = null;
 
-  // Initial UI state
+  remoteAudio.srcObject = null;
+  rHand1 = null; rHand2 = null; rFace10 = null;
+
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  muteBtn.disabled = true;
+  resetBtn.disabled = true;
+  muteBtn.textContent = "Mute mic";
+  micMuted = false;
+
   setSig(false, "off");
   setP2P(false, "off");
+  setStatus("stopped");
+};
+
+// initial pills
+setSig(false, "off");
+setP2P(false, "off");
+
+/* ---------------- Main loop ---------------- */
+function loop(){
+  if (!running) return;
+
+  if (videoReady() && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+
+    const nowMs = performance.now();
+
+    // HANDS
+    const handRes = handLandmarker.detectForVideo(video, nowMs);
+    const hands = handRes?.landmarks || [];
+    const h1 = hands[0] || null;
+    const h2 = hands[1] || null;
+
+    // FACE
+    const faceRes = faceLandmarker.detectForVideo(video, nowMs);
+    const face478 = faceRes?.faceLandmarks?.[0] || null;
+    const face10 = pickFace10(face478);
+
+    // Send pose
+    const packet = packPose(h1, h2, face10);
+    sendBinaryPose(packet);
+
+    // Render local (offset forward)
+    fillHandCloud(h1, localHand1, mpToWorld, YOU_Z);
+    fillHandCloud(h2, localHand2, mpToWorld, YOU_Z);
+    fillFaceDots(face10, faceLocal, mpToWorld, YOU_Z);
+
+    // Render remote (offset back, mirrored)
+    fillHandCloud(rHand1, remoteHand1, mpToWorldRemote, OP_Z);
+    fillHandCloud(rHand2, remoteHand2, mpToWorldRemote, OP_Z);
+    fillFaceDots(rFace10, faceRemote, mpToWorldRemote, OP_Z);
+
+    // Update head spheres based on face keypoints if present
+    // Use nose tip-ish (index 0 in our face10 array) as head center reference
+    if (face10) {
+      const nose = mpToWorld(face10[0]);
+      headYou.position.set(nose.x, nose.y, nose.z + YOU_Z);
+    } else {
+      headYou.position.set(0, 0.22, YOU_Z);
+    }
+
+    if (rFace10) {
+      const rnose = mpToWorldRemote(rFace10[0]);
+      headOp.position.set(rnose.x, rnose.y, rnose.z + OP_Z);
+    } else {
+      headOp.position.set(0, 0.22, OP_Z);
+    }
+
+    // Fighting (local punches only)
+    prevTimeMs = nowMs;
+    prevCore1 = tryPunch(h1, prevCore1, nowMs);
+    prevCore2 = tryPunch(h2, prevCore2, nowMs);
+
+    if (hpYou <= 0) setStatus("KO! You lose. Press Reset round.");
+    if (hpOp <= 0) setStatus("KO! You win. Press Reset round.");
+
+    setStatus(
+      `local hands: ${hands.length}\n` +
+      `face: ${face10 ? "yes" : "no"}\n` +
+      `peers: ${peerCount}\n` +
+      `room: ${(roomInput.value.trim()||"test")}`
+    );
+  }
+
+  controls.update();
+  renderer.render(scene, camera3D);
+  requestAnimationFrame(loop);
+}
 </script>
 </body>
 </html>
